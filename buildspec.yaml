@@ -2,24 +2,32 @@ version: 0.2
 env:
   variables:
     IMAGE_TAG: "latest" 
+phases:
   install:
     runtime-versions:
-      docker: 20 
+      docker: 20
+    commands:
+      - echo "Install phase started..."
+
   pre_build:
     commands:
       - echo "Pre-build phase started on $(date)"
       - echo "Logging in to Amazon ECR..."
-      - aws --version 
+      - aws --version
       - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
       - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME
       - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
       - IMAGE_TAG=${COMMIT_HASH:-${CODEBUILD_BUILD_ID:-latest}}
+      - echo "Repository URI: $REPOSITORY_URI"
       - echo "Image Tag: $IMAGE_TAG"
+
   build:
     commands:
       - echo "Build phase started on $(date)"
       - echo "Building the Docker image..."
-      - docker tag $REPOSITORY_URI:$IMAGE_TAG $REPOSITORY_URI:latest 
+      - docker build -t $REPOSITORY_URI:$IMAGE_TAG .
+      - docker tag $REPOSITORY_URI:$IMAGE_TAG $REPOSITORY_URI:latest
+
   post_build:
     commands:
       - echo "Post-build phase started on $(date)"
@@ -30,6 +38,7 @@ env:
       - echo "Creating imageDetail.json for CodePipeline..."
       - printf '[{"name":"%s","imageUri":"%s"}]' "$IMAGE_REPO_NAME" "$REPOSITORY_URI:$IMAGE_TAG" > imageDetail.json
       - cat imageDetail.json
+
 artifacts:
   files:
-    - imageDetail.json 
+    - imageDetail.json
