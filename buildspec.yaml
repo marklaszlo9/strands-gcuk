@@ -80,4 +80,3 @@ artifacts:
 # cache:
   # paths:
     # - '/root/.cache/pip' # Example for caching pip downloads between builds if not using Docker layer caching effectively
-```
