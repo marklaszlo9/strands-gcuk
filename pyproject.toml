@@ -1,0 +1,15 @@
+[project]
+name = "strands-agent-cli"
+version = "0.1.0"
+description = "Simple CLI for Strands Agent with MCP tools"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "strands-agents>=0.1.0",
+    "strands-agents-tools>=0.1.0",
+    "anyio",
+    "mcp[cli]>=1.8.0",
+]
+
+[project.scripts]
+strands-agent = "my_agent.agent_cli:cli"

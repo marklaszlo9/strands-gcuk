@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Server - Strands Agent</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h2>Strands Agent</h2>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                <a href="/web/connect">Connect</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h1>Add New MCP Server</h1>
+            
+            <div id="errorMessage" class="error-box" style="display: none;"></div>
+            <div id="successMessage" class="message" style="display: none;"></div>
+            
+            <form id="addServerForm" action="/web/add_server" method="post">
+                <div class="form-group">
+                    <label for="server_name">Server Name:</label>
+                    <input type="text" id="server_name" name="server_name" placeholder="e.g., postgresql2" required>
+                    <small>A unique identifier for this server</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="server_url">Server URL:</label>
+                    <input type="url" id="server_url" name="server_url" placeholder="e.g., https://mcp-pg.example.com/sse" required>
+                    <small>The URL endpoint for the MCP server</small>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="allow_http" name="allow_http">
+                        Allow HTTP (check this for non-HTTPS URLs)
+                    </label>
+                </div>
+                
+                <div class="form-group">
+                    <label for="command">Command:</label>
+                    <input type="text" id="command" name="command" value="npx" required>
+                    <small>The command to execute (usually "npx")</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="transport">Transport:</label>
+                    <select id="transport" name="transport">
+                        <option value="sse-only" selected>SSE Only</option>
+                        <option value="websocket">WebSocket</option>
+                    </select>
+                    <small>The transport protocol to use</small>
+                </div>
+                
+                <div class="form-group">
+                    <button type="submit" class="btn" id="addButton">Add Server</button>
+                </div>
+            </form>
+        </div>
+        
+        <div class="links">
+            <a href="/web/connect">Back to Connect</a>
+        </div>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('addServerForm').addEventListener('submit', function(event) {
+                event.preventDefault();
+                
+                const errorMessageElement = document.getElementById('errorMessage');
+                const successMessageElement = document.getElementById('successMessage');
+                errorMessageElement.style.display = 'none';
+                successMessageElement.style.display = 'none';
+                
+                const serverName = document.getElementById('server_name').value.trim();
+                const serverUrl = document.getElementById('server_url').value.trim();
+                
+                if (!serverName || !serverUrl) {
+                    showError('Please enter both server name and URL.');
+                    return;
+                }
+                
+                const formData = new FormData(this);
+                
+                fetch('/web/add_server', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showSuccess(data.message || 'Server added successfully!');
+                        document.getElementById('addServerForm').reset();
+                    } else {
+                        showError(data.error || 'Failed to add server.');
+                    }
+                })
+                .catch(error => {
+                    showError('An error occurred: ' + error.message);
+                });
+            });
+            
+            function showError(message) {
+                const errorMessageElement = document.getElementById('errorMessage');
+                errorMessageElement.textContent = message;
+                errorMessageElement.style.display = 'block';
+            }
+            
+            function showSuccess(message) {
+                const successMessageElement = document.getElementById('successMessage');
+                successMessageElement.textContent = message;
+                successMessageElement.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>

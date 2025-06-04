@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Strands Agent</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h2>Strands Agent</h2>
+            <div class="nav-links">
+                <a href="/web/connect">Connect</a>
+                <a href="/auth/logout">Logout</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h1>Welcome to Strands Agent</h1>
+            
+            <div class="info">
+                <p>Hello, <strong>{{ user.name }}</strong>!</p>
+                <p>Strands Agent is an AI assistant that can help you with various tasks using MCP tools.</p>
+            </div>
+            
+            <div style="text-align: center; margin-top: 30px;">
+                <a href="/web/connect" class="btn">Connect to MCP Server</a>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Features</h2>
+            <ul>
+                <li>Connect to multiple MCP servers</li>
+                <li>Choose from various AI models</li>
+                <li>Select different AWS regions</li>
+                <li>Interactive chat interface</li>
+                <li>Add and manage your own MCP servers</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>

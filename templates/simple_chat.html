@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Strands Agent Chat</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+
+        .container {
+            width: 80%;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        #chatbox {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-bottom: 20px;
+            background-color: white;
+        }
+
+        .user-message, .agent-message {
+            padding: 8px 12px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            max-width: 80%;
+        }
+
+        .user-message {
+            background-color: #e3f2fd;
+            margin-left: auto;
+            margin-right: 0;
+        }
+
+        .agent-message {
+            background-color: #f1f1f1;
+            margin-right: auto;
+            margin-left: 0;
+        }
+
+        #query-form {
+            display: flex;
+            margin-bottom: 20px;
+        }
+
+        #query-input {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px 0 0 4px;
+        }
+
+        #submit-button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 0 4px 4px 0;
+            cursor: pointer;
+        }
+
+        #submit-button:hover {
+            background-color: #45a049;
+        }
+
+        .loading {
+            text-align: center;
+            margin: 10px 0;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Strands Agent Chat</h1>
+        
+        <div id="chatbox"></div>
+        
+        <form id="query-form">
+            <input type="text" id="query-input" placeholder="Type your message here..." required>
+            <button type="submit" id="submit-button">Send</button>
+        </form>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const chatbox = document.getElementById('chatbox');
+            const queryForm = document.getElementById('query-form');
+            const queryInput = document.getElementById('query-input');
+            const submitButton = document.getElementById('submit-button');
+
+            queryForm.addEventListener('submit', function(event) {
+                event.preventDefault();
+                
+                const query = queryInput.value.trim();
+                if (!query) return;
+                
+                // Add user message to chat
+                addMessage('user', query);
+                
+                // Clear input
+                queryInput.value = '';
+                
+                // Disable input and button while processing
+                queryInput.disabled = true;
+                submitButton.disabled = true;
+                
+                // Add loading indicator
+                const loadingDiv = document.createElement('div');
+                loadingDiv.className = 'loading';
+                loadingDiv.textContent = 'Agent is thinking...';
+                chatbox.appendChild(loadingDiv);
+                chatbox.scrollTop = chatbox.scrollHeight;
+                
+                // Send query to API
+                fetch('/query', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ query: query })
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Remove loading indicator
+                    chatbox.removeChild(loadingDiv);
+                    
+                    // Add agent response to chat
+                    addMessage('agent', data.response);
+                })
+                .catch(error => {
+                    // Remove loading indicator
+                    chatbox.removeChild(loadingDiv);
+                    
+                    // Add error message
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'agent-message';
+                    errorDiv.textContent = 'Error: ' + error.message;
+                    chatbox.appendChild(errorDiv);
+                    chatbox.scrollTop = chatbox.scrollHeight;
+                })
+                .finally(() => {
+                    // Re-enable input and button
+                    queryInput.disabled = false;
+                    submitButton.disabled = false;
+                    queryInput.focus();
+                });
+            });
+            
+            function addMessage(type, text) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = type + '-message';
+                messageDiv.textContent = text;
+                chatbox.appendChild(messageDiv);
+                chatbox.scrollTop = chatbox.scrollHeight;
+            }
+            
+            // Focus input on page load
+            queryInput.focus();
+        });
+    </script>
+</body>
+</html>

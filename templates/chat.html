@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chat with Strands Agent</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h2>Strands Agent</h2>
+            <div class="nav-links">
+                <a href="/">Home</a>
+                <a href="/web/connect">Connect</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="card chat-container">
+            <div class="chat-header">
+                <h1>Chat with Strands Agent</h1>
+                
+                <div class="info">
+                    <p><strong>Connected to:</strong> {{ server_url }} | <strong>Region:</strong> {{ region }} | <strong>Model:</strong> {{ model_id }}</p>
+                    <p><strong>Session ID:</strong> {{ session_id }}</p>
+                </div>
+            </div>
+            
+            <div class="chat-history-container" id="chatHistory">
+                <!-- Chat history will appear here -->
+            </div>
+            
+            <div class="chat-form">
+                <form action="/web/query" method="post" id="queryForm">
+                    <input type="hidden" name="session_id" value="{{ session_id }}">
+                    
+                    <div class="form-group">
+                        <label for="query">Your Query:</label>
+                        <textarea id="query" name="query" rows="3" required></textarea>
+                    </div>
+                    
+                    <div class="form-group text-right">
+                        <button type="submit" class="btn">Send</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <div class="links">
+            <a href="/web/connect">Connect to Different Server</a> | 
+            <a href="/">Back to Home</a>
+        </div>
+    </div>
+
+    <script>
+        // Focus on the query textarea when the page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('query').focus();
+        });
+    </script>
+</body>
+</html>

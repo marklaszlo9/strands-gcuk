@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login - Strands Agent</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h2>Strands Agent</h2>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="login-box">
+            <h1>Welcome to Strands Agent</h1>
+            
+            {% if message %}
+            <div class="message">
+                <p>{{ message }}</p>
+            </div>
+            {% endif %}
+            
+            <p>Please login to access the Strands Agent platform.</p>
+            
+            <div style="margin-top: 30px;">
+                <a href="/auth/login" class="btn">Login with Cognito</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
