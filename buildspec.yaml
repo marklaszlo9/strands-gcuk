@@ -6,6 +6,9 @@ phases:
   install:
     commands:
       - echo "Install phase started..."
+      - echo "Account ID: $AWS_ACCOUNT_ID"
+      - echo "Region: $AWS_DEFAULT_REGION"
+      - echo "Repository Name: $IMAGE_REPO_NAME"
 
   pre_build:
     commands:
