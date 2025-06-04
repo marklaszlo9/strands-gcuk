@@ -1,6 +1,4 @@
 version: 0.2
-env:
-  IMAGE_TAG: latest
 
 phases:
   pre_build:
