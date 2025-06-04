@@ -10,7 +10,6 @@ phases:
     runtime-versions:
       docker: 20 
       - echo "Install phase started..."
-x
 
   pre_build:
     commands:
