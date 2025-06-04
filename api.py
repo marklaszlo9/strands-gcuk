@@ -179,6 +179,47 @@ async def main_chat_page(request: Request):
     })
 
 
+def _extract_main_text_from_llm_output(llm_output: Any) -> str:
+    """
+    Helper function to robustly extract the primary text content 
+    from the llm_tool_output, specifically looking for the text after "Response: ".
+    """
+    processed_text = ""
+    if isinstance(llm_output, dict):
+        content_list = llm_output.get('content')
+        if isinstance(content_list, list) and len(content_list) > 0:
+            first_content_item = content_list[0]
+            if isinstance(first_content_item, dict):
+                text_val = first_content_item.get('text')
+                if isinstance(text_val, str):
+                    # Check for "Response: " prefix and strip it
+                    prefix_to_strip = "Response: "
+                    if text_val.startswith(prefix_to_strip):
+                        processed_text = text_val[len(prefix_to_strip):].strip()
+                    else:
+                        processed_text = text_val # Use as is if prefix not found
+            # Fallback if first content item didn't yield text as expected
+            if not processed_text:
+                text_val_top = llm_output.get('text')
+                if isinstance(text_val_top, str):
+                    processed_text = text_val_top
+                else:
+                    content_val_top = llm_output.get('content') # Could be a string if not a list
+                    if isinstance(content_val_top, str):
+                        processed_text = content_val_top
+    elif isinstance(llm_output, str):
+        processed_text = llm_output
+    
+    # Final fallback: if still no string, convert the whole output
+    if not isinstance(processed_text, str) or not processed_text:
+        if llm_output is not None:
+            processed_text = str(llm_output)
+            logger.info(f"LLM output was complex or non-string, using its full string representation: {processed_text[:200]}...")
+        else:
+            processed_text = ""
+    return processed_text
+
+
 async def stream_agent_response(agent: Agent, prompt: str, session_id: str, query_text: str) -> AsyncGenerator[str, None]:
     full_response_parts = []
     processed_llm_text_output = "" 
@@ -186,26 +227,9 @@ async def stream_agent_response(agent: Agent, prompt: str, session_id: str, quer
         loop = asyncio.get_event_loop()
         llm_tool_output = await loop.run_in_executor(executor, lambda: agent.tool.use_llm(prompt=prompt))
         
-        if isinstance(llm_tool_output, dict):
-            text_val = llm_tool_output.get('text')
-            if isinstance(text_val, str):
-                processed_llm_text_output = text_val
-            else:
-                content_val = llm_tool_output.get('content')
-                if isinstance(content_val, str):
-                    processed_llm_text_output = content_val
-                else:
-                    processed_llm_text_output = str(llm_tool_output)
-        elif isinstance(llm_tool_output, str):
-            processed_llm_text_output = llm_tool_output
-        elif llm_tool_output is not None:
-            processed_llm_text_output = str(llm_tool_output)
-        else:
-            processed_llm_text_output = ""
+        processed_llm_text_output = _extract_main_text_from_llm_output(llm_tool_output)
 
-        if not isinstance(processed_llm_text_output, str):
-            processed_llm_text_output = str(processed_llm_text_output)
-
+        logger.debug(f"Session {session_id}: Raw LLM tool output type: {type(llm_tool_output)}, content: {llm_tool_output}")
         logger.debug(f"Session {session_id}: Processed text for streaming: {processed_llm_text_output}")
 
         if processed_llm_text_output: 
@@ -333,7 +357,6 @@ async def api_query_non_streaming(query_request: QueryRequest, request: Request)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found or expired.")
 
     agent: Agent = session_data["agent"]
-    response_text = "" 
     llm_tool_output_sync = "" 
     loop = asyncio.get_event_loop()
     query = query_request.query 
@@ -365,35 +388,7 @@ async def api_query_non_streaming(query_request: QueryRequest, request: Request)
         
         llm_tool_output_sync = await loop.run_in_executor(executor, lambda: agent.tool.use_llm(prompt=final_prompt_for_llm))
         
-        # Refined text extraction for non-streaming endpoint
-        processed_llm_text_output = ""
-        if isinstance(llm_tool_output_sync, dict):
-            content_list = llm_tool_output_sync.get('content')
-            if isinstance(content_list, list) and len(content_list) > 0:
-                first_content_item = content_list[0]
-                if isinstance(first_content_item, dict):
-                    text_val = first_content_item.get('text')
-                    if isinstance(text_val, str):
-                        processed_llm_text_output = text_val
-            if not processed_llm_text_output: 
-                text_val_top = llm_tool_output_sync.get('text')
-                if isinstance(text_val_top, str):
-                    processed_llm_text_output = text_val_top
-                else:
-                    content_val_top = llm_tool_output_sync.get('content')
-                    if isinstance(content_val_top, str) and not isinstance(content_val_top, list): 
-                         processed_llm_text_output = content_val_top
-        elif isinstance(llm_tool_output_sync, str):
-            processed_llm_text_output = llm_tool_output_sync
-        
-        if not isinstance(processed_llm_text_output, str) or not processed_llm_text_output:
-             if llm_tool_output_sync is not None:
-                processed_llm_text_output = str(llm_tool_output_sync)
-             else:
-                processed_llm_text_output = ""
-        
-        response_text = processed_llm_text_output
-
+        response_text = _extract_main_text_from_llm_output(llm_tool_output_sync)
 
     except Exception as e:
         logger.error(f"API Session {query_request.session_id}: Error processing query '{query}': {str(e)}", exc_info=True)
@@ -445,6 +440,5 @@ if __name__ == "__main__":
         logger.info(f"Created directory: {css_dir}")
         
     port = int(os.environ.get("PORT", 5001))
-    # Changed default host from "localhost" to "0.0.0.0" for direct execution accessibility
     host = os.environ.get("HOST", "0.0.0.0") 
     uvicorn.run("api:app", host=host, port=port, timeout_keep_alive=300, reload=True)
