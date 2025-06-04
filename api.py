@@ -186,49 +186,26 @@ async def stream_agent_response(agent: Agent, prompt: str, session_id: str, quer
         loop = asyncio.get_event_loop()
         llm_tool_output = await loop.run_in_executor(executor, lambda: agent.tool.use_llm(prompt=prompt))
         
-        # Refined logic to extract text from potentially nested structure
         if isinstance(llm_tool_output, dict):
-            content_list = llm_tool_output.get('content')
-            if isinstance(content_list, list) and len(content_list) > 0:
-                # Prioritize the first item in the content list if it contains text
-                first_content_item = content_list[0]
-                if isinstance(first_content_item, dict):
-                    text_val = first_content_item.get('text')
-                    if isinstance(text_val, str):
-                        processed_llm_text_output = text_val
-                # If the first item wasn't a dict with 'text', or content_list was empty,
-                # try to get 'text' or 'content' from the top-level dict as a fallback.
-                if not processed_llm_text_output: 
-                    text_val_top = llm_tool_output.get('text')
-                    if isinstance(text_val_top, str):
-                        processed_llm_text_output = text_val_top
-                    else:
-                        content_val_top = llm_tool_output.get('content')
-                        if isinstance(content_val_top, str): # Check if content itself is a string
-                            processed_llm_text_output = content_val_top
-            # If 'content' wasn't a list or didn't yield text, try top-level 'text'/'content'
-            if not processed_llm_text_output:
-                text_val_top = llm_tool_output.get('text')
-                if isinstance(text_val_top, str):
-                    processed_llm_text_output = text_val_top
+            text_val = llm_tool_output.get('text')
+            if isinstance(text_val, str):
+                processed_llm_text_output = text_val
+            else:
+                content_val = llm_tool_output.get('content')
+                if isinstance(content_val, str):
+                    processed_llm_text_output = content_val
                 else:
-                    content_val_top = llm_tool_output.get('content')
-                    if isinstance(content_val_top, str):
-                         processed_llm_text_output = content_val_top
-
+                    processed_llm_text_output = str(llm_tool_output)
         elif isinstance(llm_tool_output, str):
             processed_llm_text_output = llm_tool_output
-        
-        # Final fallback: if still no string, convert the whole output
-        if not isinstance(processed_llm_text_output, str) or not processed_llm_text_output:
-            if llm_tool_output is not None:
-                processed_llm_text_output = str(llm_tool_output)
-                logger.info(f"Session {session_id}: LLM output was complex or non-string, using its full string representation: {processed_llm_text_output[:200]}...") # Log snippet
-            else:
-                processed_llm_text_output = ""
+        elif llm_tool_output is not None:
+            processed_llm_text_output = str(llm_tool_output)
+        else:
+            processed_llm_text_output = ""
 
+        if not isinstance(processed_llm_text_output, str):
+            processed_llm_text_output = str(processed_llm_text_output)
 
-        logger.debug(f"Session {session_id}: Raw LLM tool output type: {type(llm_tool_output)}, content: {llm_tool_output}")
         logger.debug(f"Session {session_id}: Processed text for streaming: {processed_llm_text_output}")
 
         if processed_llm_text_output: 
@@ -398,13 +375,13 @@ async def api_query_non_streaming(query_request: QueryRequest, request: Request)
                     text_val = first_content_item.get('text')
                     if isinstance(text_val, str):
                         processed_llm_text_output = text_val
-            if not processed_llm_text_output: # Fallback to top-level or stringify
+            if not processed_llm_text_output: 
                 text_val_top = llm_tool_output_sync.get('text')
                 if isinstance(text_val_top, str):
                     processed_llm_text_output = text_val_top
                 else:
                     content_val_top = llm_tool_output_sync.get('content')
-                    if isinstance(content_val_top, str) and not isinstance(content_val_top, list): # ensure content itself is not a list
+                    if isinstance(content_val_top, str) and not isinstance(content_val_top, list): 
                          processed_llm_text_output = content_val_top
         elif isinstance(llm_tool_output_sync, str):
             processed_llm_text_output = llm_tool_output_sync
@@ -468,5 +445,6 @@ if __name__ == "__main__":
         logger.info(f"Created directory: {css_dir}")
         
     port = int(os.environ.get("PORT", 5001))
-    host = os.environ.get("HOST", "localhost") 
+    # Changed default host from "localhost" to "0.0.0.0" for direct execution accessibility
+    host = os.environ.get("HOST", "0.0.0.0") 
     uvicorn.run("api:app", host=host, port=port, timeout_keep_alive=300, reload=True)
