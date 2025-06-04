@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Agent Chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/green_cross_chat_styles.css">
+</head>
+<body>
+    <div id="chat-container">
+        <div id="chat-history">
+            <!-- Chat messages will be dynamically inserted here -->
+        </div>
+        <form id="query-form">
+            <textarea id="query-input" placeholder="Type your message..." rows="1" required></textarea>
+            <button type="submit" id="send-button">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                </svg>
+            </button>
+        </form>
+    </div>
+
+    <!-- Hidden input to store session_id from server -->
+    <input type="hidden" id="session-id-holder" value="{{ session_id }}">
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            const chatHistoryContainer = document.getElementById('chat-history');
+            const queryForm = document.getElementById('query-form');
+            const queryInput = document.getElementById('query-input');
+            const sendButton = document.getElementById('send-button');
+            const sessionId = document.getElementById('session-id-holder').value;
+
+            function escapeHtml(unsafe) {
+                if (unsafe === null || typeof unsafe === 'undefined') {
+                    return '';
+                }
+                return unsafe
+                    .toString()
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#039;");
+            }
+            
+            function renderMessage(sender, queryText, responseText, formattedResponseHtml) {
+                const messageEntry = document.createElement('div');
+                messageEntry.classList.add('message-entry');
+
+                if (sender === 'user') {
+                    const queryDiv = document.createElement('div');
+                    queryDiv.classList.add('message', 'user-message');
+                    const queryParagraph = document.createElement('p');
+                    queryParagraph.textContent = queryText;
+                    queryDiv.appendChild(queryParagraph);
+                    messageEntry.appendChild(queryDiv);
+                } else if (sender === 'agent') {
+                    const responseDiv = document.createElement('div');
+                    responseDiv.classList.add('message', 'agent-message');
+                    const responseParagraph = document.createElement('p');
+                    if (formattedResponseHtml) {
+                        responseParagraph.innerHTML = formattedResponseHtml; // Assumes server-side Markdown rendering
+                    } else {
+                        responseParagraph.textContent = responseText;
+                    }
+                    responseDiv.appendChild(responseParagraph);
+                    messageEntry.appendChild(responseDiv);
+                    return responseParagraph; // Return for potential streaming updates
+                }
+                chatHistoryContainer.appendChild(messageEntry);
+                chatHistoryContainer.scrollTop = chatHistoryContainer.scrollHeight;
+            }
+            
+            // Render initial chat history (including greeting from server)
+            const initialHistory = {{ chat_history | tojson | safe }};
+            initialHistory.forEach(exchange => {
+                if (exchange.sender === 'agent' && !exchange.query) { // Initial greeting
+                    renderMessage('agent', null, exchange.response, exchange.formatted_response);
+                } else if (exchange.sender === 'user') { // Render user query then agent response
+                    renderMessage('user', exchange.query, null, null);
+                    if (exchange.response || exchange.formatted_response) {
+                         renderMessage('agent', null, exchange.response, exchange.formatted_response);
+                    }
+                }
+            });
+
+
+            queryInput.addEventListener('input', () => {
+                queryInput.style.height = 'auto';
+                queryInput.style.height = (queryInput.scrollHeight) + 'px';
+            });
+            
+            queryInput.addEventListener('keydown', function(event) {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    queryForm.requestSubmit(sendButton);
+                }
+            });
+
+            queryForm.addEventListener('submit', async function (event) {
+                event.preventDefault();
+                const queryText = queryInput.value.trim();
+                if (!queryText) return;
+
+                sendButton.disabled = true;
+                queryInput.disabled = true;
+                queryInput.style.height = 'auto'; // Reset height
+
+                renderMessage('user', queryText, null, null);
+                queryInput.value = '';
+
+                const agentMessagePlaceholder = document.createElement('div');
+                agentMessagePlaceholder.classList.add('message', 'agent-message');
+                const agentParagraph = document.createElement('p');
+                agentParagraph.innerHTML = '<span class="thinking-indicator"><span>.</span><span>.</span><span>.</span></span>';
+                agentMessagePlaceholder.appendChild(agentParagraph);
+                
+                const agentEntry = document.createElement('div');
+                agentEntry.classList.add('message-entry');
+                agentEntry.appendChild(agentMessagePlaceholder);
+                chatHistoryContainer.appendChild(agentEntry);
+                chatHistoryContainer.scrollTop = chatHistoryContainer.scrollHeight;
+                
+                const formData = new FormData();
+                formData.append('session_id', sessionId);
+                formData.append('query', queryText);
+
+                try {
+                    const response = await fetch('/web/query', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!response.ok) {
+                        agentParagraph.innerHTML = `<span style="color:red;">Error: ${response.status} ${response.statusText || 'Failed to get response'}</span>`;
+                        return;
+                    }
+
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    agentParagraph.innerHTML = ''; // Clear "Thinking..."
+
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true });
+                        let eolIndex;
+                        while ((eolIndex = buffer.indexOf('\n\n')) >= 0) {
+                            const line = buffer.substring(0, eolIndex).trim();
+                            buffer = buffer.substring(eolIndex + 2);
+
+                            if (line.startsWith('data:')) {
+                                try {
+                                    const jsonData = JSON.parse(line.substring(5).trim());
+                                    if (jsonData.type === 'chunk') {
+                                        const unescapedChunk = jsonData.content.replace(/\\n/g, '\n');
+                                        // Create a temporary div to parse potential HTML from markdown
+                                        // For live streaming, it's safer to append as text unless you know chunks are safe HTML
+                                        // The final formatted_response from history will be full HTML.
+                                        // For now, appending as text, newlines handled by pre-wrap.
+                                        agentParagraph.textContent += unescapedChunk;
+                                    } else if (jsonData.type === 'error') {
+                                        agentParagraph.innerHTML += `<br><span style="color:red;">Error: ${escapeHtml(jsonData.content.replace(/\\n/g, '\n'))}</span>`;
+                                        break; 
+                                    } else if (jsonData.type === 'end') {
+                                        // Server now saves the full formatted response.
+                                        // The current textContent is the raw streamed text.
+                                        // For the UI to show the *final* Markdown-rendered HTML without a refresh,
+                                        // the 'end' event could carry this HTML, or an update mechanism.
+                                        // For now, what's streamed is what's shown live.
+                                        console.log("Stream ended by server.");
+                                    }
+                                } catch (e) {
+                                    console.error("Error parsing SSE JSON:", e, "Line:", line);
+                                }
+                            }
+                        }
+                        chatHistoryContainer.scrollTop = chatHistoryContainer.scrollHeight;
+                    }
+                } catch (error) {
+                    console.error('Streaming fetch error:', error);
+                    agentParagraph.innerHTML = '<span style="color:red;">Error connecting to the agent.</span>';
+                } finally {
+                    sendButton.disabled = false;
+                    queryInput.disabled = false;
+                    queryInput.focus();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

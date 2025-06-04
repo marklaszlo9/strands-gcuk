@@ -3,14 +3,20 @@
 <head>
     <title>Chat with Strands Agent</title>
     <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        /* Additional styles for chat bubbles if needed */
+        .exchange p {
+            white-space: pre-wrap; /* Ensures newlines in text are rendered */
+        }
+    </style>
 </head>
 <body>
     <div class="header">
         <div class="container">
             <h2>Strands Agent</h2>
             <div class="nav-links">
-                <a href="/">Home</a>
-                <a href="/web/connect">Connect</a>
+                <a href="/">New Session</a> 
+                <!-- Link to /web/connect which effectively starts a new session -->
             </div>
         </div>
     </div>
@@ -18,44 +24,194 @@
     <div class="container">
         <div class="card chat-container">
             <div class="chat-header">
-                <h1>Chat with Strands Agent</h1>
-
+                <h1>Chat Session</h1>
                 <div class="info">
-                     <strong>Region:</strong> {{ region }} | <strong>Model:</strong> {{ model_id }}</p>
-                    <p><strong>Session ID:</strong> {{ session_id }}</p>
+                    <p><strong>Session ID:</strong> <span id="sessionIdDisplay">{{ session_id }}</span></p>
+                    <p><strong>Region:</strong> {{ region }} | <strong>Model:</strong> {{ model_id }}</p>
                 </div>
             </div>
-
-            <div class="chat-history-container" id="chatHistory">
-                <!-- Chat history will appear here -->
-            </div>
-
-            <div class="chat-form">
-                <form action="/web/query" method="post" id="queryForm">
-                    <input type="hidden" name="session_id" value="{{ session_id }}">
-
-                    <div class="form-group">
-                        <label for="query">Your Query:</label>
-                        <textarea id="query" name="query" rows="3" required></textarea>
+            
+            <div class="chat-history-container" id="chatHistoryContainer">
+                {% for exchange in chat_history %}
+                <div class="exchange">
+                    <div class="query">
+                        <strong>You:</strong>
+                        <p>{{ exchange.query }}</p>
                     </div>
-
+                    <div class="response">
+                        <strong>Agent:</strong>
+                        <!-- Use safe filter if formatted_response contains HTML from Markdown -->
+                        <p>{{ exchange.formatted_response | safe if exchange.formatted_response else exchange.response }}</p>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            
+            <div class="chat-form">
+                <form id="queryForm">
+                    <!-- session_id is now part of the URL, will be extracted by JS -->
+                    <div class="form-group">
+                        <label for="queryInput">Your Query:</label>
+                        <textarea id="queryInput" name="query" rows="3" required></textarea>
+                    </div>
+                    
                     <div class="form-group text-right">
-                        <button type="submit" class="btn">Send</button>
+                        <button type="submit" class="btn" id="sendButton">Send</button>
                     </div>
                 </form>
             </div>
         </div>
-
-        <div class="links">
-            <a href="/web/connect">Choose a different model.</a> |
-            <a href="/">Back to Home</a>
-        </div>
     </div>
 
     <script>
-        // Focus on the query textarea when the page loads
         document.addEventListener('DOMContentLoaded', function() {
-            document.getElementById('query').focus();
+            const queryForm = document.getElementById('queryForm');
+            const queryInput = document.getElementById('queryInput');
+            const chatHistoryContainer = document.getElementById('chatHistoryContainer');
+            const sendButton = document.getElementById('sendButton');
+
+            // Extract session_id from the URL path
+            const pathParts = window.location.pathname.split('/');
+            const sessionId = pathParts[pathParts.length - 1];
+            document.getElementById('sessionIdDisplay').textContent = sessionId;
+
+
+            // Function to safely create text nodes or handle simple HTML
+            function appendContentToParagraph(paragraph, textContent) {
+                // The server now sends escaped newlines in JSON, then markdown processes it.
+                // For direct text appending, we might need to replace \\n with \n first.
+                // However, since the server side's format_response_html handles markdown to HTML,
+                // we should aim to render that HTML.
+                // For streaming chunks, if they are plain text with escaped newlines:
+                const unescapedText = textContent.replace(/\\n/g, '\n');
+                // If markdown is already applied by server for full response, this might be too simple.
+                // For live streaming, we append text and let browser handle newlines in <p> with pre-wrap.
+                // If chunks are HTML, then use innerHTML.
+                paragraph.appendChild(document.createTextNode(unescapedText));
+            }
+            
+            // Function to add a message to the chat display
+            function addMessageToUI(type, text, isHtml = false) {
+                const messageWrapper = document.createElement('div');
+                messageWrapper.className = 'exchange';
+                
+                const messageDiv = document.createElement('div');
+                messageDiv.className = type; // 'query' or 'response'
+                
+                const strongTag = document.createElement('strong');
+                strongTag.textContent = type === 'query' ? 'You:' : 'Agent:';
+                
+                const pTag = document.createElement('p');
+                if (isHtml) {
+                    pTag.innerHTML = text; // Use this if text is already HTML
+                } else {
+                    pTag.textContent = text; // For plain text
+                }
+                
+                messageDiv.appendChild(strongTag);
+                messageDiv.appendChild(pTag);
+                messageWrapper.appendChild(messageDiv);
+                chatHistoryContainer.appendChild(messageWrapper);
+                chatHistoryContainer.scrollTop = chatHistoryContainer.scrollHeight;
+                return pTag; // Return the paragraph element for streaming updates
+            }
+
+            // Scroll to bottom on page load if there's history
+            chatHistoryContainer.scrollTop = chatHistoryContainer.scrollHeight;
+            queryInput.focus();
+
+            queryForm.addEventListener('submit', async function(event) {
+                event.preventDefault();
+                
+                const queryText = queryInput.value.trim();
+                if (!queryText) return;
+
+                sendButton.disabled = true;
+                queryInput.disabled = true;
+                
+                addMessageToUI('query', queryText);
+                queryInput.value = ''; 
+                
+                const agentParagraph = addMessageToUI('response', '<em>Thinking...</em>', true);
+
+                const formData = new FormData();
+                formData.append('session_id', sessionId);
+                formData.append('query', queryText);
+
+                try {
+                    const response = await fetch('/web/query', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!response.ok) {
+                        agentParagraph.innerHTML = `<span style="color:red;">Error: ${response.status} ${response.statusText || 'Failed to get response'}</span>`;
+                        sendButton.disabled = false;
+                        queryInput.disabled = false;
+                        return;
+                    }
+                    
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    agentParagraph.innerHTML = ''; // Clear "Thinking..."
+
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) {
+                            // Stream finished. The server has saved the full response to history.
+                            // If needed, you could reload chat history here, or trust the UI is up-to-date.
+                            break;
+                        }
+                        
+                        buffer += decoder.decode(value, { stream: true });
+                        
+                        let eolIndex;
+                        while ((eolIndex = buffer.indexOf('\n\n')) >= 0) {
+                            const line = buffer.substring(0, eolIndex).trim();
+                            buffer = buffer.substring(eolIndex + 2);
+
+                            if (line.startsWith('data:')) {
+                                try {
+                                    const jsonData = JSON.parse(line.substring(5).trim());
+                                    if (jsonData.type === 'chunk') {
+                                        // Content is text with escaped newlines.
+                                        // The format_response_html on server side will eventually convert this to HTML.
+                                        // For live display, we unescape and append.
+                                        const unescapedChunk = jsonData.content.replace(/\\n/g, '\n');
+                                        agentParagraph.textContent += unescapedChunk;
+                                    } else if (jsonData.type === 'error') {
+                                        agentParagraph.innerHTML += `<br><span style="color:red;">Error: ${jsonData.content.replace(/\\n/g, '\n')}</span>`;
+                                        break; // Stop processing further messages on error
+                                    } else if (jsonData.type === 'end') {
+                                        // Stream officially ended by server.
+                                        // The full response is now in agentParagraph.textContent
+                                        // The server saves the markdown formatted version.
+                                        // To display the final markdown-rendered HTML, you might need to
+                                        // make another call or rely on a page refresh if history is reloaded.
+                                        // For now, the accumulated textContent is shown.
+                                        // If you want to replace with formatted HTML after stream, you'd need a mechanism.
+                                        // The server saves the formatted version, so a page reload would show it.
+                                        // Or, the 'end' event could carry the final formatted HTML.
+                                        // Current server 'end' event is just a signal.
+                                        console.log("Stream ended.");
+                                    }
+                                } catch (e) {
+                                    console.error("Error parsing SSE JSON:", e, "Line:", line);
+                                }
+                            }
+                        }
+                        chatHistoryContainer.scrollTop = chatHistoryContainer.scrollHeight;
+                    }
+                } catch (error) {
+                    console.error('Streaming fetch error:', error);
+                    agentParagraph.innerHTML = '<span style="color:red;">Error connecting to the agent.</span>';
+                } finally {
+                    sendButton.disabled = false;
+                    queryInput.disabled = false;
+                    queryInput.focus();
+                }
+            });
         });
     </script>
 </body>

@@ -1,22 +1,19 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Connect to Agent - Strands Agent</title>
+    <title>Start Chat - Strands Agent</title>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
     <div class="header">
         <div class="container">
             <h2>Strands Agent</h2>
-            <div class="nav-links">
-                <a href="/">Home</a>
-            </div>
         </div>
     </div>
 
     <div class="container">
         <div class="card">
-            <h1>Configure Agent Session</h1>
+            <h1>Start New Chat Session</h1>
             
             {% if error %}
             <div class="error-box">
@@ -24,79 +21,14 @@
             </div>
             {% endif %}
 
-            <form action="/web/connect" method="post">
-                <div class="form-group">
-                    <label for="region">AWS Region:</label>
-                    <select id="region" name="region" required>
-                        {% for region_code in regions %}
-                        <option value="{{ region_code }}" {% if region_code == "us-west-2" %}selected{% endif %}>{{ region_code }}</option>
-                        {% endfor %}
-                    </select>
-                    <small>Select the AWS region where your Bedrock resources are located.</small>
-                </div>
-                
-                <div class="form-group">
-                    <label for="model_id">Model ID:</label>
-                    <select id="model_id" name="model_id" required>
-                        {% for model in models %}
-                        <option value="{{ model.id }}" data-region="{{ model.region }}" {% if model.id == "anthropic.claude-3-5-sonnet-20240620-v2:0" %}selected{% endif %}>{{ model.name }}</option>
-                        {% endfor %}
-                    </select>
-                    <small>Select the foundation model for the agent's language understanding and generation.</small>
-                </div>
-                
-                <div class="form-group">
-                    <button type="submit" class="btn">Start Chat Session</button>
-                </div>
+            <p>A new chat session will be started with the default agent configuration.</p>
+            
+            <!-- This form now uses method="get" -->
+            <form action="/web/connect" method="get" style="text-align: center; margin-top: 20px;">
+                <button type="submit" class="btn">Start Chat</button>
             </form>
+
         </div>
     </div>
-    
-    <script>
-        // Filter models based on selected region (if applicable, otherwise this can be simplified or removed)
-        document.addEventListener('DOMContentLoaded', function() {
-            const regionSelect = document.getElementById('region');
-            const modelSelect = document.getElementById('model_id');
-            const allModels = Array.from(modelSelect.options);
-            const defaultModelId = "anthropic.claude-3-5-sonnet-20240620-v2:0"; // Ensure this model is in your model_tooluse.txt or update default
-            
-            function filterModelsByRegion() {
-                const selectedRegion = regionSelect.value;
-                let isDefaultModelAvailableInSelectedRegion = false;
-
-                allModels.forEach(option => {
-                    if (option.dataset.region === selectedRegion || !option.dataset.region) { // Show if region matches or if model has no specific region
-                        option.style.display = '';
-                        if (option.value === defaultModelId) {
-                            isDefaultModelAvailableInSelectedRegion = true;
-                        }
-                    } else {
-                        option.style.display = 'none';
-                    }
-                });
-                
-                // If current selection is hidden, select a visible one
-                if (modelSelect.options[modelSelect.selectedIndex].style.display === 'none') {
-                    if (isDefaultModelAvailableInSelectedRegion) {
-                        modelSelect.value = defaultModelId;
-                    } else {
-                        // Select the first visible option if default is not available or not in region
-                        const firstVisibleOption = allModels.find(opt => opt.style.display !== 'none');
-                        if (firstVisibleOption) {
-                            modelSelect.value = firstVisibleOption.value;
-                        }
-                    }
-                } else if (isDefaultModelAvailableInSelectedRegion) {
-                     modelSelect.value = defaultModelId;
-                }
-            }
-            
-            // Initial filter
-            filterModelsByRegion();
-            
-            // Filter when region changes
-            regionSelect.addEventListener('change', filterModelsByRegion);
-        });
-    </script>
 </body>
 </html>
