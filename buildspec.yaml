@@ -18,7 +18,7 @@ phases:
       - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME
       - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
       - IMAGE_TAG=${COMMIT_HASH:-${CODEBUILD_BUILD_ID:-latest}}
-      - echo "Image Tag: $IMAGE_TAG"
+
 
   build:
     commands:
