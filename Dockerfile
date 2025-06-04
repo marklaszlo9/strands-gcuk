@@ -1,44 +1,37 @@
-FROM python:3.12-slim
+# Use an official Python runtime as a parent image (adjust version as needed)
+FROM python:3.10-slim
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq-dev \
-    gcc \
-    curl \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
+# Set the working directory in the container
 WORKDIR /app
 
-# Copy requirements first for better caching
+# Copy the requirements file into the container at /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir mcp
 
-# Copy application code
-COPY . .
+# Install any needed packages specified in requirements.txt
+# Using --no-cache-dir to reduce image size
+# Ensure your requirements.txt includes 'uvicorn', 'python-dotenv', 'markdown' etc.
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Create non-root user and set permissions
-RUN useradd -m -r mcpclient && \
-    chown -R mcpclient:mcpclient /app && \
-    # Create directory for any writable files
-    mkdir -p /app/data && \
-    chown -R mcpclient:mcpclient /app/data && \
-    chmod -R 770 /app/data
+# Copy the rest of your application code into the container at /app
+# This includes api.py, model_tooluse.txt, and the entire templates directory
+COPY api.py .
+COPY model_tooluse.txt . 
+COPY templates ./templates
 
-USER mcpclient
-
-# Expose the port the app runs on
+# Make port 5001 available to the world outside this container
+# This should match the port your uvicorn server in api.py listens on
 EXPOSE 5001
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:5001/health || exit 1
+# Define environment variables that your application needs.
+# These should be set in your runtime environment (e.g., ECS Task Definition)
+ENV PYTHONUNBUFFERED=1
+ENV PORT=5001
+ENV HOST="0.0.0.0" # Important for Docker to allow external connections to the container
+# ENV STRANDS_KNOWLEDGE_BASE_ID="your-kb-id-from-runtime-env"
+# ENV AWS_REGION="your-aws-region-from-runtime-env" # e.g., us-east-1
+# ENV SESSION_SECRET_KEY="a-very-strong-random-secret-key-from-runtime-env"
 
-# Command to run the application
-CMD ["python3", "api.py", "--host", "0.0.0.0", "--port", "5001"]
+# Command to run your application using Uvicorn
+# Note: "api:app" refers to the 'app' FastAPI instance in the 'api.py' file.
+# reload=True is removed for production/containerized environments.
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "5001"]
