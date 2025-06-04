@@ -2,43 +2,23 @@ version: 0.2
 
 env:
   variables:
-    # These should be configured in your CodeBuild project's environment variables
-    # AWS_ACCOUNT_ID: "YOUR_AWS_ACCOUNT_ID"
-    # AWS_DEFAULT_REGION: "YOUR_AWS_REGION" # e.g., us-west-2
-    # IMAGE_REPO_NAME: "your-ecr-repo-name"
-    # IMAGE_TAG: "latest" # Default, can be overridden or made dynamic below
+    IMAGE_TAG: "latest" 
 
-    # Note: Runtime environment variables for your Python application
-    # (e.g., STRANDS_KNOWLEDGE_BASE_ID, COGNITO_CLIENT_ID, PORT, HOST, etc.)
-    # should be set in your runtime environment (e.g., ECS Task Definition, Lambda, Elastic Beanstalk),
-    # NOT typically here or as Docker --build-args unless they are truly build-time configurations.
-    # The ENV lines in your Dockerfile set defaults or placeholders for these runtime variables.
 
 phases:
   install:
     runtime-versions:
-      # Specify runtime versions for CodeBuild's environment if needed for pre-build scripts.
-      # Docker build itself will use versions specified in the Dockerfile.
-      # python: 3.10 # Example, if running Python scripts directly on the CodeBuild instance
-      docker: 20 # Specify a Docker version compatible with your needs
-    commands:
+      docker: 20 
       - echo "Install phase started..."
-      # Any pre-requisite installations for the build process itself can go here.
-      # For example, if you needed 'jq' for parsing JSON:
-      # - apt-get update -y && apt-get install -y jq
+x
 
   pre_build:
     commands:
       - echo "Pre-build phase started on $(date)"
       - echo "Logging in to Amazon ECR..."
-      # Ensure AWS_ACCOUNT_ID, AWS_DEFAULT_REGION, and IMAGE_REPO_NAME are set
-      # in your CodeBuild project's environment variables.
-      # The CodeBuild service role needs ECR permissions.
-      - aws --version # Verify AWS CLI is available
+      - aws --version 
       - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
       - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME
-      # Use CODEBUILD_RESOLVED_SOURCE_VERSION for a unique tag based on commit ID (good for traceability)
-      # Fallback to CODEBUILD_BUILD_ID or 'latest' if the source version isn't available.
       - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
       - IMAGE_TAG=${COMMIT_HASH:-${CODEBUILD_BUILD_ID:-latest}}
       - echo "Repository URI: $REPOSITORY_URI"
@@ -48,35 +28,19 @@ phases:
     commands:
       - echo "Build phase started on $(date)"
       - echo "Building the Docker image..."
-      # The Dockerfile (assumed to be in the root of your source) will be used.
-      # If you need to pass build arguments to Docker:
-      # - docker build -t $REPOSITORY_URI:$IMAGE_TAG --build-arg MY_BUILD_ARG=$MY_BUILD_ARG_VALUE .
-      # For your current Dockerfile, no build-args are strictly necessary as ENVs are for runtime.
-      - docker build -t $REPOSITORY_URI:$IMAGE_TAG .
-      - docker tag $REPOSITORY_URI:$IMAGE_TAG $REPOSITORY_URI:latest # Optionally tag as 'latest' as well
+      - docker tag $REPOSITORY_URI:$IMAGE_TAG $REPOSITORY_URI:latest 
 
   post_build:
     commands:
       - echo "Post-build phase started on $(date)"
       - echo "Pushing the Docker image to ECR..."
       - docker push $REPOSITORY_URI:$IMAGE_TAG
-      - docker push $REPOSITORY_URI:latest # Optionally push the 'latest' tag
+      - docker push $REPOSITORY_URI:latest
       - echo "Docker image push complete."
-      # Outputting an image definitions file (imageDetail.json).
-      # This is useful if this CodeBuild project is part of an AWS CodePipeline
-      # that deploys to services like Amazon ECS, AWS Fargate, or Elastic Beanstalk.
       - echo "Creating imageDetail.json for CodePipeline..."
       - printf '[{"name":"%s","imageUri":"%s"}]' "$IMAGE_REPO_NAME" "$REPOSITORY_URI:$IMAGE_TAG" > imageDetail.json
       - cat imageDetail.json
 
 artifacts:
   files:
-    - imageDetail.json # This artifact can be used by downstream CodePipeline stages
-    # You can include other build artifacts here if necessary:
-    # - 'appspec.yml'
-    # - 'target/*.jar'
-  # discard-paths: yes # Uncomment if you only want the artifacts specified above and not the whole source
-
-# cache:
-  # paths:
-    # - '/root/.cache/pip' # Example for caching pip downloads between builds if not using Docker layer caching effectively
+    - imageDetail.json 
