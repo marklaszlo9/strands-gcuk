@@ -25,6 +25,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from strands import Agent
 from strands_tools import use_llm
 from strands_tools.memory import memory as bedrock_kb_memory_tool
+from strands.models import BedrockModel 
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -119,7 +120,13 @@ async def _create_new_agent_session(user_id: str) -> str:
     region = DEFAULT_REGION
     model_id = DEFAULT_MODEL_ID
     
-    agent = Agent(model=model_id, tools=[use_llm, bedrock_kb_memory_tool]) 
+    bedrock_model_instance = BedrockModel(
+        model_id=model_id,
+        region=region
+    )
+
+    # Pass the BedrockModel instance to the Agent
+    agent = Agent(model=bedrock_model_instance, tools=[use_llm, bedrock_kb_memory_tool])
     logger.info(f"Session {session_id}: Strands Agent initialized with model {model_id}, tools for region {region}.")
     
     initial_greeting_html = format_response_html(INITIAL_GREETING)
