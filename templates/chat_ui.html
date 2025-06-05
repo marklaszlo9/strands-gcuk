@@ -6,10 +6,46 @@
     <title>AI Agent Chat</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/green_cross_chat_styles.css">
+    <style>
+        /* Added style for logout link */
+        .logout-link-container {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            z-index: 100;
+        }
+        .logout-link {
+            font-family: var(--font-body);
+            color: var(--primary-green);
+            text-decoration: none;
+            font-weight: 600;
+            padding: 8px 12px;
+            border-radius: 5px;
+            transition: background-color 0.2s, color 0.2s;
+        }
+        .logout-link:hover {
+            background-color: var(--accent-light-grey);
+            color: var(--primary-green);
+        }
+         @media (max-width: 600px) {
+            .logout-link-container {
+                top: 10px;
+                right: 10px;
+            }
+            .logout-link {
+                font-size: 0.9rem;
+                padding: 6px 10px;
+            }
+        }
+    </style>
 </head>
 <body>
+    <div class="logout-link-container">
+        <a href="/auth/logout" class="logout-link">Logout</a>
+    </div>
+
     <div id="chat-container">
         <div id="chat-history">
             <!-- Chat messages will be dynamically inserted here -->
@@ -64,24 +100,23 @@
                     responseDiv.classList.add('message', 'agent-message');
                     const responseParagraph = document.createElement('p');
                     if (formattedResponseHtml) {
-                        responseParagraph.innerHTML = formattedResponseHtml; // Assumes server-side Markdown rendering
+                        responseParagraph.innerHTML = formattedResponseHtml; 
                     } else {
                         responseParagraph.textContent = responseText;
                     }
                     responseDiv.appendChild(responseParagraph);
                     messageEntry.appendChild(responseDiv);
-                    return responseParagraph; // Return for potential streaming updates
+                    return responseParagraph; 
                 }
                 chatHistoryContainer.appendChild(messageEntry);
                 chatHistoryContainer.scrollTop = chatHistoryContainer.scrollHeight;
             }
             
-            // Render initial chat history (including greeting from server)
             const initialHistory = {{ chat_history | tojson | safe }};
             initialHistory.forEach(exchange => {
-                if (exchange.sender === 'agent' && !exchange.query) { // Initial greeting
+                if (exchange.sender === 'agent' && !exchange.query) { 
                     renderMessage('agent', null, exchange.response, exchange.formatted_response);
-                } else if (exchange.sender === 'user') { // Render user query then agent response
+                } else if (exchange.sender === 'user') { 
                     renderMessage('user', exchange.query, null, null);
                     if (exchange.response || exchange.formatted_response) {
                          renderMessage('agent', null, exchange.response, exchange.formatted_response);
@@ -109,7 +144,7 @@
 
                 sendButton.disabled = true;
                 queryInput.disabled = true;
-                queryInput.style.height = 'auto'; // Reset height
+                queryInput.style.height = 'auto'; 
 
                 renderMessage('user', queryText, null, null);
                 queryInput.value = '';
@@ -136,15 +171,23 @@
                         body: formData
                     });
 
+                    if (response.status === 401) { 
+                        agentParagraph.innerHTML = '<span style="color:red;">Your session may have expired. Please <a href="/login-page" style="color:red; text-decoration:underline;">login</a> again.</span>';
+                        sendButton.disabled = false; 
+                        queryInput.disabled = true;
+                        return;
+                    }
                     if (!response.ok) {
-                        agentParagraph.innerHTML = `<span style="color:red;">Error: ${response.status} ${response.statusText || 'Failed to get response'}</span>`;
+                        agentParagraph.innerHTML = `<span style="color:red;">Error: ${response.status} ${escapeHtml(response.statusText) || 'Failed to get response'}</span>`;
+                        sendButton.disabled = false;
+                        queryInput.disabled = false;
                         return;
                     }
 
                     const reader = response.body.getReader();
                     const decoder = new TextDecoder();
                     let buffer = '';
-                    agentParagraph.innerHTML = ''; // Clear "Thinking..."
+                    agentParagraph.innerHTML = ''; 
 
                     while (true) {
                         const { value, done } = await reader.read();
@@ -161,20 +204,11 @@
                                     const jsonData = JSON.parse(line.substring(5).trim());
                                     if (jsonData.type === 'chunk') {
                                         const unescapedChunk = jsonData.content.replace(/\\n/g, '\n');
-                                        // Create a temporary div to parse potential HTML from markdown
-                                        // For live streaming, it's safer to append as text unless you know chunks are safe HTML
-                                        // The final formatted_response from history will be full HTML.
-                                        // For now, appending as text, newlines handled by pre-wrap.
                                         agentParagraph.textContent += unescapedChunk;
                                     } else if (jsonData.type === 'error') {
                                         agentParagraph.innerHTML += `<br><span style="color:red;">Error: ${escapeHtml(jsonData.content.replace(/\\n/g, '\n'))}</span>`;
                                         break; 
                                     } else if (jsonData.type === 'end') {
-                                        // Server now saves the full formatted response.
-                                        // The current textContent is the raw streamed text.
-                                        // For the UI to show the *final* Markdown-rendered HTML without a refresh,
-                                        // the 'end' event could carry this HTML, or an update mechanism.
-                                        // For now, what's streamed is what's shown live.
                                         console.log("Stream ended by server.");
                                     }
                                 } catch (e) {
