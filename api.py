@@ -66,7 +66,7 @@ app.add_middleware(
 
 # Hardcoded configuration
 DEFAULT_REGION = "us-east-1"
-DEFAULT_MODEL_ID = "amazon.nova-pro-v1:0"
+DEFAULT_MODEL_ID = "us.amazon.nova-pro-v1:0"
 INITIAL_GREETING = "Hi there, I am your AI agent here to help."
 
 # --- Pydantic Models ---
@@ -134,7 +134,7 @@ async def _create_new_agent_session(user_id: str) -> str:
     agent_sessions[session_id] = {
         "agent": agent, 
         "region": region, 
-        "model_id": model_id, 
+        "model_id": bedrock_model_instance, 
         "chat_history": [{
             "sender": "agent", 
             "query": None, 
