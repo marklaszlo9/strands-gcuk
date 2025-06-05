@@ -66,7 +66,7 @@ app.add_middleware(
 
 # Hardcoded configuration
 DEFAULT_REGION = "us-east-1"
-DEFAULT_MODEL_ID = "us.amazon.nova-pro-v1:0"
+DEFAULT_MODEL_ID = "amazon.nova-pro-v1:0"
 INITIAL_GREETING = "Hi there, I am your AI agent here to help."
 
 # --- Pydantic Models ---
