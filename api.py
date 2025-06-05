@@ -4,10 +4,10 @@ import os
 import secrets
 import base64
 import json
-import markdown 
+import markdown # For formatting responses
 import concurrent.futures
 from typing import Dict, List, Optional, Any, AsyncGenerator
-from urllib.parse import urlencode, quote_plus
+from urllib.parse import urlencode
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -21,8 +21,6 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware 
 from fastapi.middleware.gzip import GZipMiddleware
-# For potential ID token validation/decoding, though direct claims extraction from payload is often sufficient
-# from jose import jwt, JWTError 
 
 from strands import Agent
 from strands_tools import use_llm
@@ -32,7 +30,7 @@ from strands_tools.memory import memory as bedrock_kb_memory_tool
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("strands-agent-api")
 
-app = FastAPI(title="Strands Agent Chat UI with Cognito")
+app = FastAPI(title="Strands Agent Chat UI")
 
 # Add middleware for compression
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -48,46 +46,25 @@ templates = Jinja2Templates(directory=templates_dir)
 static_files_dir = os.path.join(templates_dir, "static")
 app.mount("/static", StaticFiles(directory=static_files_dir), name="static")
 
+
 # Store agent sessions by session ID
 agent_sessions: Dict[str, Dict[str, Any]] = {}
 
-# --- Cognito Configuration ---
-COGNITO_DOMAIN = os.environ.get("COGNITO_DOMAIN") # e.g., your-domain.auth.us-east-1.amazoncognito.com
-COGNITO_CLIENT_ID = os.environ.get("COGNITO_CLIENT_ID")
-COGNITO_CLIENT_SECRET = os.environ.get("COGNITO_CLIENT_SECRET") # Optional, if your app client has a secret
-COGNITO_REDIRECT_URI = os.environ.get("COGNITO_REDIRECT_URI_APP") # e.g., http://localhost:5001/auth/callback
-COGNITO_LOGOUT_REDIRECT_URI = os.environ.get("COGNITO_LOGOUT_REDIRECT_URI_APP") # e.g., http://localhost:5001/logged-out
-COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID") # e.g., us-east-1_xxxxxxxxx
-AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
-COGNITO_EXPECTED_SCOPE = os.environ.get("COGNITO_EXPECTED_SCOPE", "openid profile email") # Added profile for name
-
-# Construct authority and metadata URL from User Pool ID and Region
-if COGNITO_USER_POOL_ID and AWS_REGION:
-    COGNITO_AUTHORITY = f"https://cognito-idp.{AWS_REGION}.amazonaws.com/{COGNITO_USER_POOL_ID}"
-    COGNITO_SERVER_METADATA_URL = f"{COGNITO_AUTHORITY}/.well-known/openid-configuration"
-else:
-    COGNITO_AUTHORITY = None
-    COGNITO_SERVER_METADATA_URL = None
-    logger.warning("COGNITO_USER_POOL_ID or AWS_REGION not set, cannot construct Cognito authority/metadata URL.")
-
-essential_cognito_vars = [COGNITO_DOMAIN, COGNITO_CLIENT_ID, COGNITO_REDIRECT_URI, COGNITO_LOGOUT_REDIRECT_URI, COGNITO_USER_POOL_ID]
-if not all(essential_cognito_vars):
-    logger.error("CRITICAL: One or more essential Cognito environment variables are not set. Authentication will fail.")
-    # Potentially raise an error or prevent app startup if Cognito is mandatory
-
+# Knowledge Base ID (Still needed)
 STRANDS_KNOWLEDGE_BASE_ID = os.environ.get("STRANDS_KNOWLEDGE_BASE_ID")
+
 if not STRANDS_KNOWLEDGE_BASE_ID: 
     logger.error("CRITICAL: STRANDS_KNOWLEDGE_BASE_ID environment variable is not set. Knowledge base functionality will fail.")
 
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.environ.get("SESSION_SECRET_KEY", secrets.token_urlsafe(32)),
-    session_cookie="strands_chat_session_auth", 
-    max_age=3600 * 8 
+    session_cookie="strands_chat_session", 
+    max_age=3600 * 8 # 8 hours session
 )
 
-# Hardcoded configuration (for agent, not Cognito)
-DEFAULT_REGION = "us-east-1" # This is distinct from AWS_REGION for Cognito if agent uses a different Bedrock region
+# Hardcoded configuration
+DEFAULT_REGION = "us-east-1"
 DEFAULT_MODEL_ID = "us.amazon.nova-pro-v1:0"
 INITIAL_GREETING = "Hi there, I am your AI agent here to help."
 
@@ -109,6 +86,7 @@ class QueryResponse(BaseModel):
     formatted_response: Optional[str] = None
 # --- End Pydantic Models ---
 
+
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("Shutting down thread pool executor.")
@@ -124,12 +102,21 @@ def format_response_html(text: str) -> str:
         logger.error(f"Error formatting text to HTML: {e}")
         return str(text).replace('\n', '<br>') if text else ""
 
+MOCK_USER_ID_COUNTER = 0
 async def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
-    return request.session.get("user")
+    global MOCK_USER_ID_COUNTER
+    if "mock_user" not in request.session:
+        MOCK_USER_ID_COUNTER += 1
+        request.session["mock_user"] = {
+            "id": f"mock_user_{MOCK_USER_ID_COUNTER}_{secrets.token_hex(4)}",
+            "email": f"mock_user_{MOCK_USER_ID_COUNTER}@example.com", 
+            "name": f"Mock User {MOCK_USER_ID_COUNTER}" 
+        }
+    return request.session["mock_user"]
 
 async def _create_new_agent_session(user_id: str) -> str:
     session_id = secrets.token_urlsafe(16)
-    region = DEFAULT_REGION # Agent's Bedrock region
+    region = DEFAULT_REGION
     model_id = DEFAULT_MODEL_ID
     
     agent = Agent(model=model_id, tools=[use_llm, bedrock_kb_memory_tool]) 
@@ -147,139 +134,23 @@ async def _create_new_agent_session(user_id: str) -> str:
             "response": INITIAL_GREETING,
             "formatted_response": initial_greeting_html
         }], 
-        "user_id": user_id # Associate agent session with authenticated user
+        "user_id": user_id
     }
-    logger.info(f"Session {session_id} created for user {user_id}. KB ID: {STRANDS_KNOWLEDGE_BASE_ID}.")
+    logger.info(f"Session {session_id} created for user {user_id}. KB ID: {STRANDS_KNOWLEDGE_BASE_ID}. Model: {model_id}, Region: {region}")
     return session_id
 
-# --- Authentication Routes ---
-@app.get("/login-page", response_class=HTMLResponse)
-async def login_page(request: Request):
-    return templates.TemplateResponse("login_page.html", {"request": request})
-
-@app.get("/auth/login")
-async def cognito_login(request: Request):
-    if not all(essential_cognito_vars):
-        raise HTTPException(status_code=500, detail="Cognito client settings are not configured on the server.")
-    
-    auth_url_params = {
-        "client_id": COGNITO_CLIENT_ID,
-        "response_type": "code",
-        "scope": COGNITO_EXPECTED_SCOPE,
-        "redirect_uri": COGNITO_REDIRECT_URI_APP
-    }
-    cognito_auth_url = f"https://{COGNITO_DOMAIN}/oauth2/authorize?{urlencode(auth_url_params)}"
-    logger.info(f"Redirecting to Cognito for login: {cognito_auth_url}")
-    return RedirectResponse(cognito_auth_url, status_code=status.HTTP_302_FOUND)
-
-@app.get("/auth/callback", response_class=HTMLResponse)
-async def auth_callback(request: Request, code: Optional[str] = None, error: Optional[str] = None, error_description: Optional[str] = None):
-    if error:
-        logger.error(f"Cognito auth error on callback: {error} - {error_description}")
-        return templates.TemplateResponse("error_page.html", {"request": request, "error_message": f"Authentication error: {error_description or error}"})
-    if not code:
-        logger.error("Cognito auth callback received no code.")
-        return templates.TemplateResponse("error_page.html", {"request": request, "error_message": "Authentication failed: No authorization code received."})
-
-    try:
-        token_endpoint = f"https://{COGNITO_DOMAIN}/oauth2/token"
-        payload = {
-            "grant_type": "authorization_code",
-            "client_id": COGNITO_CLIENT_ID,
-            "code": code,
-            "redirect_uri": COGNITO_REDIRECT_URI_APP # Must match what was sent in /auth/login
-        }
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        if COGNITO_CLIENT_SECRET:
-            auth_str = f"{COGNITO_CLIENT_ID}:{COGNITO_CLIENT_SECRET}"
-            auth_header = base64.b64encode(auth_str.encode()).decode()
-            headers["Authorization"] = f"Basic {auth_header}"
-        
-        response = requests.post(token_endpoint, data=payload, headers=headers)
-        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
-        tokens = response.json()
-
-        id_token = tokens.get("id_token")
-        if not id_token:
-            logger.error("ID token not found in Cognito response.")
-            return templates.TemplateResponse("error_page.html", {"request": request, "error_message": "Authentication failed: ID token missing."})
-
-        # Decode ID token payload (claims part) - usually the middle part
-        try:
-            _, id_payload_b64, _ = id_token.split('.')
-            # Add padding if necessary for base64 decoding
-            id_payload_b64_padded = id_payload_b64 + '=' * ((4 - len(id_payload_b64) % 4) % 4)
-            user_claims = json.loads(base64.urlsafe_b64decode(id_payload_b64_padded).decode('utf-8'))
-        except Exception as e:
-            logger.error(f"Failed to decode ID token payload: {e}", exc_info=True)
-            return templates.TemplateResponse("error_page.html", {"request": request, "error_message": "Invalid ID token format."})
-        
-        # Store relevant user info in session
-        request.session["user"] = {
-            "id": user_claims.get("sub"), # Subject claim, unique user ID
-            "email": user_claims.get("email"),
-            "name": user_claims.get("name", user_claims.get("cognito:username", user_claims.get("email"))),
-            # Optionally store tokens if needed for backend API calls, but be mindful of security
-            # "access_token": tokens.get("access_token"), 
-            # "id_token_raw": id_token 
-        }
-        logger.info(f"User {user_claims.get('email')} successfully authenticated.")
-        return RedirectResponse("/", status_code=status.HTTP_302_FOUND)
-
-    except requests.exceptions.RequestException as e:
-        logger.error(f"HTTP error during Cognito token exchange: {e}", exc_info=True)
-        return templates.TemplateResponse("error_page.html", {"request": request, "error_message": f"Network error during authentication: {e}"})
-    except Exception as e:
-        logger.error(f"General authentication callback error: {e}", exc_info=True)
-        return templates.TemplateResponse("error_page.html", {"request": request, "error_message": f"An unexpected error occurred during authentication: {e}"})
-
-@app.get("/auth/logout")
-async def cognito_logout(request: Request):
-    user_id = request.session.get("user", {}).get("id")
-    
-    # Clear local FastAPI session
-    request.session.clear() 
-    logger.info(f"User {user_id or 'Unknown'} cleared local session.")
-
-    if not all([COGNITO_DOMAIN, COGNITO_CLIENT_ID, COGNITO_LOGOUT_REDIRECT_URI]):
-        logger.warning("Cognito logout parameters not fully configured. Redirecting to /logged-out locally.")
-        return RedirectResponse("/logged-out", status_code=status.HTTP_302_FOUND)
-
-    # Redirect to Cognito's central logout endpoint
-    logout_url_params = {
-        "client_id": COGNITO_CLIENT_ID,
-        "logout_uri": COGNITO_LOGOUT_REDIRECT_URI,
-        "response_type": "code" # Common for logout flows that redirect
-    }
-    cognito_logout_url = f"https://{COGNITO_DOMAIN}/logout?{urlencode(logout_url_params)}"
-    logger.info(f"Redirecting user {user_id or 'Unknown'} to Cognito logout: {cognito_logout_url}")
-    return RedirectResponse(cognito_logout_url, status_code=status.HTTP_302_FOUND)
-
-@app.get("/logged-out", response_class=HTMLResponse)
-async def logged_out_page(request: Request):
-    return templates.TemplateResponse("logged_out.html", {"request": request, "message": "You have been successfully logged out."})
-
-
-# --- Main Application Routes ---
 @app.get("/", response_class=HTMLResponse)
 async def main_chat_page(request: Request):
     user = await get_current_user(request) 
-    if not user:
-        logger.info("No authenticated user in session, redirecting to login page.")
-        return RedirectResponse("/login-page", status_code=status.HTTP_302_FOUND)
-    
     user_id = user["id"]
     agent_session_id = request.session.get("agent_session_id")
     
-    if agent_session_id and agent_session_id in agent_sessions and agent_sessions[agent_session_id].get("user_id") == user_id:
+    if agent_session_id and agent_session_id in agent_sessions:
         logger.info(f"User {user_id} returning to existing agent session: {agent_session_id}")
-    else: # No valid agent session for this user, or user_id mismatch
-        if agent_session_id and agent_sessions.get(agent_session_id, {}).get("user_id") != user_id:
-             logger.warning(f"User {user_id} had agent_session_id {agent_session_id} in FastAPI session, but it belongs to another user or is invalid. Creating new.")
-        
+    else:
         if not STRANDS_KNOWLEDGE_BASE_ID:
             logger.error("Cannot create new agent session: STRANDS_KNOWLEDGE_BASE_ID not set.")
-            return templates.TemplateResponse("error_page.html", {"request": request, "error_message": "Chat service unavailable (KB not configured)."}, status_code=503)
+            return templates.TemplateResponse("error_page.html", {"request": request, "error_message": "Chat service is currently unavailable. Knowledge Base not configured."}, status_code=503)
         
         try:
             agent_session_id = await _create_new_agent_session(user_id)
@@ -290,18 +161,29 @@ async def main_chat_page(request: Request):
 
     current_agent_session = agent_sessions.get(agent_session_id)
     if not current_agent_session: 
-        logger.error(f"Critical: Agent session {agent_session_id} for user {user_id} is missing after attempt to create/load.")
-        return templates.TemplateResponse("error_page.html", {"request": request, "error_message": "Failed to initialize chat session. Please try again."}, status_code=500)
+        logger.error(f"Agent session {agent_session_id} not found in agent_sessions dict after creation/retrieval.")
+        try:
+            agent_session_id = await _create_new_agent_session(user_id)
+            request.session["agent_session_id"] = agent_session_id
+            current_agent_session = agent_sessions.get(agent_session_id)
+            if not current_agent_session: 
+                 return templates.TemplateResponse("error_page.html", {"request": request, "error_message": "Failed to initialize chat session. Please try again."}, status_code=500)
+        except Exception as e:
+            logger.error(f"Fallback session creation failed for user {user_id}: {e}", exc_info=True)
+            return templates.TemplateResponse("error_page.html", {"request": request, "error_message": "Critical error starting chat session."}, status_code=500)
 
     return templates.TemplateResponse("chat_ui.html", {
         "request": request,
         "session_id": agent_session_id, 
-        "chat_history": current_agent_session["chat_history"],
-        "user_name": user.get("name", user.get("email")) # For display if needed
+        "chat_history": current_agent_session["chat_history"]
     })
 
 
 def _extract_main_text_from_llm_output(llm_output: Any) -> str:
+    """
+    Helper function to robustly extract the primary text content 
+    from the llm_tool_output, specifically looking for the text after "Response: ".
+    """
     processed_text = ""
     if isinstance(llm_output, dict):
         content_list = llm_output.get('content')
@@ -310,22 +192,25 @@ def _extract_main_text_from_llm_output(llm_output: Any) -> str:
             if isinstance(first_content_item, dict):
                 text_val = first_content_item.get('text')
                 if isinstance(text_val, str):
+                    # Check for "Response: " prefix and strip it
                     prefix_to_strip = "Response: "
                     if text_val.startswith(prefix_to_strip):
                         processed_text = text_val[len(prefix_to_strip):].strip()
                     else:
-                        processed_text = text_val 
+                        processed_text = text_val # Use as is if prefix not found
+            # Fallback if first content item didn't yield text as expected
             if not processed_text:
                 text_val_top = llm_output.get('text')
                 if isinstance(text_val_top, str):
                     processed_text = text_val_top
                 else:
-                    content_val_top = llm_output.get('content') 
+                    content_val_top = llm_output.get('content') # Could be a string if not a list
                     if isinstance(content_val_top, str):
                         processed_text = content_val_top
     elif isinstance(llm_output, str):
         processed_text = llm_output
     
+    # Final fallback: if still no string, convert the whole output
     if not isinstance(processed_text, str) or not processed_text:
         if llm_output is not None:
             processed_text = str(llm_output)
@@ -341,14 +226,19 @@ async def stream_agent_response(agent: Agent, prompt: str, session_id: str, quer
     try:
         loop = asyncio.get_event_loop()
         llm_tool_output = await loop.run_in_executor(executor, lambda: agent.tool.use_llm(prompt=prompt))
+        
         processed_llm_text_output = _extract_main_text_from_llm_output(llm_tool_output)
+
+        logger.debug(f"Session {session_id}: Raw LLM tool output type: {type(llm_tool_output)}, content: {llm_tool_output}")
         logger.debug(f"Session {session_id}: Processed text for streaming: {processed_llm_text_output}")
 
         if processed_llm_text_output: 
             full_response_parts.append(processed_llm_text_output) 
             escaped_response_text = processed_llm_text_output.replace("\n", "\\n")
             yield f"data: {json.dumps({'type': 'chunk', 'content': escaped_response_text})}\n\n" 
+
         yield f"data: {json.dumps({'type': 'end'})}\n\n"
+
     except Exception as e:
         logger.error(f"Session {session_id}: Error during agent response streaming: {str(e)}", exc_info=True)
         error_message = f"Sorry, an error occurred: {str(e)}"
@@ -359,6 +249,7 @@ async def stream_agent_response(agent: Agent, prompt: str, session_id: str, quer
         if session_id in agent_sessions:
             safe_parts = [str(part) for part in full_response_parts]
             final_response_for_history = "".join(safe_parts) 
+            
             formatted_html_response = format_response_html(final_response_for_history) 
             agent_sessions[session_id]["chat_history"].append({
                 "sender": "user", 
@@ -371,43 +262,63 @@ async def stream_agent_response(agent: Agent, prompt: str, session_id: str, quer
 
 @app.post("/web/query", response_class=StreamingResponse) 
 async def web_query_stream(request: Request, session_id: str = Form(...), query: str = Form(...)):
-    user = await get_current_user(request)
-    if not user: # Protected route
-        async def auth_error_stream():
-            yield f"data: {json.dumps({'type': 'error', 'content': 'Authentication required. Please login.'})}\n\n"
-        return StreamingResponse(auth_error_stream(), media_type="text/event-stream", status_code=401)
-
     session_data = agent_sessions.get(session_id)
-    if not session_data or not session_data.get("agent") or session_data.get("user_id") != user.get("id"):
+
+    if not session_data or not session_data.get("agent"):
         async def error_stream():
-            yield f"data: {json.dumps({'type': 'error', 'content': 'Session invalid or expired. Please refresh.'})}\n\n"
-        logger.warning(f"Streaming query: Session {session_id} invalid for user {user.get('id')}.")
+            yield f"data: {json.dumps({'type': 'error', 'content': 'Session not found or invalid. Please refresh.'})}\n\n"
+        logger.warning(f"Streaming query: Session {session_id} not found or agent invalid.")
         return StreamingResponse(error_stream(), media_type="text/event-stream")
 
     agent: Agent = session_data["agent"]
     loop = asyncio.get_event_loop() 
+
     try:
-        logger.info(f"Session {session_id}: Attempting KB retrieval for query: '{query}' by user {user.get('id')}")
+        logger.info(f"Session {session_id}: Attempting KB retrieval for query: '{query}' using KB ID: {STRANDS_KNOWLEDGE_BASE_ID}")
         retrieved_data_raw = await loop.run_in_executor(
             executor, 
-            lambda: agent.tool.memory(action="retrieve", query=query, knowledge_base_id=STRANDS_KNOWLEDGE_BASE_ID, max_results=3)
+            lambda: agent.tool.memory(
+                action="retrieve", 
+                query=query, 
+                knowledge_base_id=STRANDS_KNOWLEDGE_BASE_ID, 
+                max_results=3 
+            )
         )
+        logger.debug(f"Session {session_id}: Retrieved data from KB (raw): {retrieved_data_raw}")
+        
         contexts = []
         if isinstance(retrieved_data_raw, list):
             for item in retrieved_data_raw:
-                if isinstance(item, dict) and 'text' in item and isinstance(item['text'], str): contexts.append(item['text'])
-                elif isinstance(item, str): contexts.append(item)
-        elif isinstance(retrieved_data_raw, dict) and 'text' in retrieved_data_raw and isinstance(retrieved_data_raw['text'], str): contexts.append(retrieved_data_raw['text'])
-        elif isinstance(retrieved_data_raw, str): contexts.append(retrieved_data_raw)
+                if isinstance(item, dict) and 'text' in item and isinstance(item['text'], str):
+                    contexts.append(item['text'])
+                elif isinstance(item, str): 
+                    contexts.append(item)
+        elif isinstance(retrieved_data_raw, dict) and 'text' in retrieved_data_raw and isinstance(retrieved_data_raw['text'], str):
+             contexts.append(retrieved_data_raw['text'])
+        elif isinstance(retrieved_data_raw, str):
+             contexts.append(retrieved_data_raw)
         
         final_prompt_for_llm = ""
         if not contexts:
-            final_prompt_for_llm = (f"User query: \"{query}\"\nRespond that you couldn't find an answer in the knowledge base and are not trained for this query.")
+            logger.info(f"Session {session_id}: No relevant information found in KB for '{query}'.")
+            final_prompt_for_llm = (
+                f"The user asked: \"{query}\"\n"
+                f"I could not find an answer to this in my knowledge base. "
+                f"Please respond by stating that you are an agent with a specific knowledge base and this query is outside of what you were trained on, "
+                f"or that you couldn't find the specific information."
+            )
         else:
             context_str = "\n\n---\n\n".join(contexts)
-            final_prompt_for_llm = (f"Context:\n{context_str}\n\nUser query: \"{query}\"\nAnswer concisely based on context.")
+            final_prompt_for_llm = (
+                f"Based on the following information from the knowledge base:\n{context_str}\n\n"
+                f"Please provide a concise answer to the user's query: \"{query}\"\n"
+                f"If the context is sufficient, answer directly. If the context seems related but not a direct answer, "
+                f"summarize the relevant findings. If the context is clearly not relevant, state that you couldn't find a specific answer in the provided information."
+            )
+            logger.info(f"Session {session_id}: Generating response using RAG with {len(contexts)} context(s).")
         
         return StreamingResponse(stream_agent_response(agent, final_prompt_for_llm, session_id, query), media_type="text/event-stream")
+
     except Exception as e:
         logger.error(f"Session {session_id}: Pre-stream error for query '{query}': {str(e)}", exc_info=True)
         async def error_stream_main(): 
@@ -416,19 +327,22 @@ async def web_query_stream(request: Request, session_id: str = Form(...), query:
             yield f"data: {json.dumps({'type': 'error', 'content': escaped_error_msg})}\n\n"
             if session_id in agent_sessions: 
                  agent_sessions[session_id]["chat_history"].append({
-                    "sender": "user", "query": query, "response": f"[Error: {error_msg}]", 
-                    "formatted_response": format_response_html(f"[Error: {error_msg}]")})
+                    "sender": "user", 
+                    "query": query, 
+                    "response": f"[Error: {error_msg}]", 
+                    "formatted_response": format_response_html(f"[Error: {error_msg}]")
+                })
         return StreamingResponse(error_stream_main(), media_type="text/event-stream")
 
-# --- API Endpoints (for programmatic access, also need auth) ---
+# Non-streaming API endpoints (kept for potential other uses, but web UI uses streaming)
 @app.post("/connect", response_model=ConnectResponse) 
-async def api_connect(apiRequestData: ConnectApiRequest, request: Request): # Renamed ConnectApiRequest param
+async def api_connect(apiRequestData: ConnectApiRequest, request: Request):
     user = await get_current_user(request) 
-    if not user: raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     if not STRANDS_KNOWLEDGE_BASE_ID:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Knowledge Base not configured.")
+        logger.error("API /connect: STRANDS_KNOWLEDGE_BASE_ID not set.")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Knowledge Base is not configured on the server.")
     try:
-        user_id_for_session = user.get("id")
+        user_id_for_session = user.get("id", "api_anonymous_user") if user else "api_anonymous_user"
         session_id = await _create_new_agent_session(user_id_for_session) 
         return ConnectResponse(session_id=session_id, message=f"Agent session created successfully with model {DEFAULT_MODEL_ID}")
     except Exception as e:
@@ -438,16 +352,16 @@ async def api_connect(apiRequestData: ConnectApiRequest, request: Request): # Re
 @app.post("/query", response_model=QueryResponse) 
 async def api_query_non_streaming(query_request: QueryRequest, request: Request): 
     user = await get_current_user(request)
-    if not user: raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
-
     session_data = agent_sessions.get(query_request.session_id)
-    if not session_data or not session_data.get("agent") or session_data.get("user_id") != user.get("id"):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session invalid or not found for user.")
+    if not session_data or not session_data.get("agent"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found or expired.")
 
     agent: Agent = session_data["agent"]
+    llm_tool_output_sync = "" 
     loop = asyncio.get_event_loop()
     query = query_request.query 
     try:
+        logger.info(f"API NPO-STREAM Session {query_request.session_id}: Attempting KB retrieval for query: '{query}'")
         retrieved_data_raw = await loop.run_in_executor(
             executor, 
             lambda: agent.tool.memory(action="retrieve", query=query, knowledge_base_id=STRANDS_KNOWLEDGE_BASE_ID, max_results=3)
@@ -462,12 +376,18 @@ async def api_query_non_streaming(query_request: QueryRequest, request: Request)
 
         final_prompt_for_llm = ""
         if not contexts:
-            final_prompt_for_llm = (f"User query: \"{query}\"\nRespond that you couldn't find an answer in the KB and are not trained for this.")
+            final_prompt_for_llm = (
+                f"The user asked: \"{query}\"\n"
+                f"I could not find an answer to this in my knowledge base. "
+                f"Please respond by stating that you are an agent with a specific knowledge base and this query is outside of what you were trained on, "
+                f"or that you couldn't find the specific information."
+            )
         else:
             context_str = "\n\n---\n\n".join(contexts)
             final_prompt_for_llm = (f"Context:\n{context_str}\n\nQuery: {query}\n\nAnswer concisely.")
         
         llm_tool_output_sync = await loop.run_in_executor(executor, lambda: agent.tool.use_llm(prompt=final_prompt_for_llm))
+        
         response_text = _extract_main_text_from_llm_output(llm_tool_output_sync)
 
     except Exception as e:
@@ -476,24 +396,22 @@ async def api_query_non_streaming(query_request: QueryRequest, request: Request)
 
     formatted_response = format_response_html(response_text)
     session_data.setdefault("chat_history", []).append({
-        "sender": "user", "query": query, "response": response_text, "formatted_response": formatted_response
+        "sender": "user", 
+        "query": query, 
+        "response": response_text, 
+        "formatted_response": formatted_response
     })
     return QueryResponse(response=response_text, formatted_response=formatted_response)
 
 @app.delete("/session/{session_id}") 
 async def cleanup_session_endpoint(session_id: str, request: Request):
     user = await get_current_user(request) 
-    if not user: raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
-    
     if session_id in agent_sessions:
-        if agent_sessions[session_id].get("user_id") == user.get("id"):
-            del agent_sessions[session_id]
-            if request.session.get("agent_session_id") == session_id:
-                 request.session.pop("agent_session_id")
-            logger.info(f"Session {session_id} cleaned up by user {user.get('id')}.")
-            return JSONResponse({"message": "Session cleaned up successfully."})
-        else:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User not authorized to delete this session.")
+        current_user_id = user.get("id") if user else "unknown_api_user"
+        del agent_sessions[session_id]
+        request.session.pop("agent_session_id", None) 
+        logger.info(f"Session {session_id} cleaned up by user {current_user_id}.")
+        return JSONResponse({"message": "Session cleaned up successfully."})
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")
 
 @app.get("/health", status_code=status.HTTP_200_OK)
@@ -509,10 +427,17 @@ if __name__ == "__main__":
     static_main_dir = os.path.join(templates_main_dir, "static")
     css_dir = os.path.join(static_main_dir, "css")
 
-    for dir_path in [templates_main_dir, static_main_dir, css_dir]:
-        if not os.path.exists(dir_path):
-            os.makedirs(dir_path, exist_ok=True)
-            logger.info(f"Created directory: {dir_path}")
+    if not os.path.exists(templates_main_dir):
+        os.makedirs(templates_main_dir, exist_ok=True)
+        logger.info(f"Created directory: {templates_main_dir}")
+        
+    if not os.path.exists(static_main_dir):
+        os.makedirs(static_main_dir, exist_ok=True)
+        logger.info(f"Created directory: {static_main_dir}")
+
+    if not os.path.exists(css_dir):
+        os.makedirs(css_dir, exist_ok=True)
+        logger.info(f"Created directory: {css_dir}")
         
     port = int(os.environ.get("PORT", 5001))
     host = os.environ.get("HOST", "0.0.0.0") 
