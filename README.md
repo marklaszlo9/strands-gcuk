@@ -11,7 +11,6 @@ Strands MCP Client is a FastAPI-based web application that allows users to inter
 - Connect to multiple MCP servers
 - Select from various AI models (Claude, etc.)
 - Interactive chat interface
-- AWS Cognito authentication
 - Tool integration through MCP
 
 ## System Architecture
@@ -23,14 +22,6 @@ Strands MCP Client is a FastAPI-based web application that allows users to inter
 │                 │     │  (FastAPI)      │     │                 │
 │                 │◀────│                 │◀────│                 │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
-                               │                        │
-                               ▼                        ▼
-                        ┌─────────────────┐     ┌─────────────────┐
-                        │                 │     │                 │
-                        │  AWS Cognito    │     │  AI Models      │
-                        │  Authentication │     │  (Claude, etc.) │
-                        │                 │     │                 │
-                        └─────────────────┘     └─────────────────┘
 ```
 
 ## Requirements
@@ -58,20 +49,6 @@ Strands MCP Client is a FastAPI-based web application that allows users to inter
    ```bash
    pip install -r requirements.txt
    ```
-
-## Configuration
-
-Create a `.env` file in the project root with the following variables:
-
-```
-COGNITO_DOMAIN=your-cognito-domain.auth.us-west-2.amazoncognito.com
-COGNITO_CLIENT_ID=your-client-id
-COGNITO_CLIENT_SECRET=your-client-secret
-COGNITO_REDIRECT_URI=http://localhost:5001/auth/callback
-COGNITO_LOGOUT_URI=http://localhost:5001/logout
-AWS_REGION=us-west-2
-COGNITO_USER_POOL_ID=us-west-2_your-user-pool-id
-```
 
 ## MCP Server Configuration
 
@@ -135,14 +112,12 @@ strands-mcp-agent/
 ├── __init__.py
 ├── agent_cli.py       # CLI interface
 ├── api.py             # FastAPI application
-├── cognito_auth.py    # AWS Cognito authentication
-├── mcp_servers.json   # MCP server configuration
 ├── requirements.txt   # Dependencies
+├── pyproject.toml     # Packaging config
 └── templates/         # HTML templates
-    ├── chat.html
-    ├── connect.html
-    ├── index.html
-    └── login.html
+    ├── chat_ui.html
+    ├── error_page.html
+    └── static/
 ```
 
 ## License
