@@ -12,4 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-strands-agent = "my_agent.agent_cli:cli"
+strands-agent = "agent_cli:cli"
+
+[tool.setuptools]
+py-modules = ["agent_cli"]
