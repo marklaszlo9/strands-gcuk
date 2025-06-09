@@ -73,28 +73,6 @@ AWS_REGION=us-west-2
 COGNITO_USER_POOL_ID=us-west-2_your-user-pool-id
 ```
 
-## MCP Server Configuration
-
-You can configure MCP servers in the `mcp_servers.json` file:
-
-```json
-{
-  "mcpServers": {
-    "mysql": {
-      "url": "http://mcp-mysql-server-url/sse",
-      "command": "npx",
-      "transport": "sse-only",
-      "allow_http": true
-    },
-    "postgres": {
-      "url": "https://mcp-pg-server-url/sse",
-      "command": "npx",
-      "transport": "sse-only",
-      "allow_http": false
-    }
-  }
-}
-```
 
 ## Usage
 
@@ -131,18 +109,20 @@ optional arguments:
 ## Project Structure
 
 ```
-strands-mcp-agent/
+strands-gcuk/
 ├── __init__.py
 ├── agent_cli.py       # CLI interface
 ├── api.py             # FastAPI application
-├── cognito_auth.py    # AWS Cognito authentication
-├── mcp_servers.json   # MCP server configuration
+├── buildspec.yaml     # AWS CodeBuild specification
+├── Dockerfile         # Container image definition
+├── pyproject.toml     # Project metadata
 ├── requirements.txt   # Dependencies
-└── templates/         # HTML templates
-    ├── chat.html
-    ├── connect.html
-    ├── index.html
-    └── login.html
+└── templates/         # HTML templates and static assets
+    ├── chat_ui.html
+    ├── error_page.html
+    └── static/
+        └── css/
+            └── green_cross_chat_styles.css
 ```
 
 ## License
