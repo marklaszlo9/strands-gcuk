@@ -1,76 +1,48 @@
-# Strands MCP Client
+# Strands Agent Client
 
-A web application for interacting with AI agents through the Model Context Protocol (MCP).
+A lightweight FastAPI web interface and CLI for interacting with Strands AI agents.
 
 ## Overview
 
-Strands MCP Client is a FastAPI-based web application that allows users to interact with AI agents powered by the Strands framework and Model Context Protocol. It provides a user-friendly interface for connecting to different MCP servers, selecting AI models, and having conversations with AI agents.
+The application exposes a minimal REST API along with a simple HTML page for chatting with an agent.  It can also be used from the command line for quick experiments.
 
 ## Features
 
-- Connect to multiple MCP servers
-- Select from various AI models (Claude, etc.)
 - Interactive chat interface
-- Tool integration through MCP
+- Optional command line access
+- Connects to Strands agents using the standard API
 
 ## System Architecture
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│                 │     │                 │     │                 │
-│  Web Browser    │────▶│  Strands API    │────▶│  MCP Server     │
-│                 │     │  (FastAPI)      │     │                 │
-│                 │◀────│                 │◀────│                 │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
+┌─────────────┐     ┌─────────────┐
+│             │     │             │
+│ Web Browser │ ──▶ │ Strands API │
+│             │ ◀── │             │
+└─────────────┘     └─────────────┘
 ```
 
 ## Requirements
 
-- Python 3.10 or higher
+- Python 3.10+
 - FastAPI
 - Strands Agents
-- MCP Client
 
 ## Installation
 
 1. Clone the repository:
-   ```bash
-   git clone https://github.com/vgodwinamz/strands-mcp-agent.git
-   cd strands-mcp-agent
-   ```
 
-2. Create a virtual environment:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
+```bash
+git clone <repo-url>
+cd strands-gcuk
+```
 
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+2. Create a virtual environment and install dependencies:
 
-## MCP Server Configuration
-
-You can configure MCP servers in the `mcp_servers.json` file:
-
-```json
-{
-  "mcpServers": {
-    "mysql": {
-      "url": "http://mcp-mysql-server-url/sse",
-      "command": "npx",
-      "transport": "sse-only",
-      "allow_http": true
-    },
-    "postgres": {
-      "url": "https://mcp-pg-server-url/sse",
-      "command": "npx",
-      "transport": "sse-only",
-      "allow_http": false
-    }
-  }
-}
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
 ## Usage
@@ -83,41 +55,33 @@ Start the FastAPI application:
 python api.py
 ```
 
-Then open your browser to http://localhost:5001
+Open your browser to <http://localhost:5001>.
 
-### Running as CLI
+### Running from the Command Line
 
-For quick testing, you can use the CLI interface:
+For quick testing you can use the CLI:
 
 ```bash
-python agent_cli.py --server https://mcp-pg.agentic-ai-aws.com/sse --query "What's the weather in Seattle?"
+python agent_cli.py --query "Hello"
 ```
 
-CLI options:
-```
-usage: agent_cli.py [-h] [--server SERVER_URL] [--verbose]
-
-Run Strands agent with MCP tools
-
-optional arguments:
-  -h, --help           show this help message and exit
-  --server SERVER_URL  URL of the MCP server to connect to
-  --verbose            Enable verbose logging
-```
+Use `--server` to specify a remote tool server and `--verbose` for debug logs.
 
 ## Project Structure
 
 ```
-strands-mcp-agent/
+strands-gcuk/
 ├── __init__.py
-├── agent_cli.py       # CLI interface
-├── api.py             # FastAPI application
-├── requirements.txt   # Dependencies
-├── pyproject.toml     # Packaging config
-└── templates/         # HTML templates
-    ├── chat_ui.html
-    ├── error_page.html
-    └── static/
+├── agent_cli.py
+├── api.py
+├── requirements.txt
+├── pyproject.toml
+├── templates/
+│   ├── chat_ui.html
+│   ├── error_page.html
+│   └── static/
+└── tests/
+    └── test_api.py
 ```
 
 ## License
@@ -127,4 +91,4 @@ MIT
 ## Acknowledgments
 
 - [Strands Agents](https://strandsagents.com/0.1.x/) for the agent framework
-- Model Context Protocol (MCP) for the standardized interface to AI models
+
