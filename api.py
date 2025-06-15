@@ -410,7 +410,7 @@ async def api_query_non_streaming(query_request: QueryRequest, request: Request)
         logger.error(f"API Session {query_request.session_id}: Error processing query '{query}': {str(e)}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error processing query: {str(e)}")
 
-    formatted_response = format_response_html(.response_text)
+    formatted_response = format_response_html(response_text)
     session_data.setdefault("chat_history", []).append({
         "sender": "user",
         "query": query,
