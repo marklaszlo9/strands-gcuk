@@ -6,7 +6,7 @@ import base64
 import json
 import markdown 
 import concurrent.futures
-from typing import Dict, List, Optional, Any, AsyncGenerator
+from typing import Dict, List, Optional, Any, AsyncGenerator, Tuple
 from urllib.parse import urlencode
 from dotenv import load_dotenv
 
@@ -68,6 +68,20 @@ app.add_middleware(
 DEFAULT_REGION = "us-east-1"
 DEFAULT_MODEL_ID = "us.amazon.nova-micro-v1:0"
 INITIAL_GREETING = "Hi there, I am your AI agent here to help."
+SYSTEM_PROMPT = """You are a helpful assistant specializing in SUSTAINABILITY IN INFRASTRUCTURES. Your knowledge base contains information on this topic.
+
+First, determine if the user's query is related to sustainability in infrastructures.
+- If the query is related, use the knowledge base to provide a comprehensive answer.
+- If the query is NOT related (e.g., a simple greeting, a question about a different topic), you MUST respond with: "I was not developed to answer this question. Please ask me about sustainability in infrastructures."
+
+Be kind and professional in all your responses.
+"""
+
+bedrock_model_instance = BedrockModel(
+        model_id=DEFAULT_MODEL_ID,
+        region=DEFAULT_REGION,
+        system_prompt=SYSTEM_PROMPT
+    )
 
 
 # --- Pydantic Models ---
@@ -115,7 +129,6 @@ async def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
             "name": f"Mock User {MOCK_USER_ID_COUNTER}" 
         }
     return request.session["mock_user"]
-
 async def _create_new_agent_session(user_id: str) -> str:
     session_id = secrets.token_urlsafe(16)
     region = DEFAULT_REGION
@@ -123,7 +136,8 @@ async def _create_new_agent_session(user_id: str) -> str:
     
     bedrock_model_instance = BedrockModel(
         model_id=model_id,
-        region=region
+        region=region,
+        system_prompt=SYSTEM_PROMPT
     )
 
     # Pass the BedrockModel instance to the Agent
