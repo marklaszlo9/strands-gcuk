@@ -12,8 +12,7 @@
 <body>
     <div id="chat-container">
         <div id="chat-history">
-            <!-- Chat messages will be dynamically inserted here -->
-        </div>
+            </div>
         <form id="query-form">
             <textarea id="query-input" placeholder="Type your message..." rows="1" required></textarea>
             <button type="submit" id="send-button">
@@ -24,7 +23,6 @@
         </form>
     </div>
 
-    <!-- Hidden input to store session_id from server -->
     <input type="hidden" id="session-id-holder" value="{{ session_id }}">
 
     <script>
@@ -59,20 +57,22 @@
                     queryParagraph.textContent = queryText;
                     queryDiv.appendChild(queryParagraph);
                     messageEntry.appendChild(queryDiv);
+                    chatHistoryContainer.appendChild(messageEntry); // Append user messages
                 } else if (sender === 'agent') {
                     const responseDiv = document.createElement('div');
                     responseDiv.classList.add('message', 'agent-message');
                     const responseParagraph = document.createElement('p');
                     if (formattedResponseHtml) {
-                        responseParagraph.innerHTML = formattedResponseHtml; // Assumes server-side Markdown rendering
+                        responseParagraph.innerHTML = formattedResponseHtml;
                     } else {
                         responseParagraph.textContent = responseText;
                     }
                     responseDiv.appendChild(responseParagraph);
                     messageEntry.appendChild(responseDiv);
-                    return responseParagraph; // Return for potential streaming updates
+                    chatHistoryContainer.appendChild(messageEntry); // FIX: Append agent messages
+                    return responseParagraph;
                 }
-                chatHistoryContainer.appendChild(messageEntry);
+                
                 chatHistoryContainer.scrollTop = chatHistoryContainer.scrollHeight;
             }
             
