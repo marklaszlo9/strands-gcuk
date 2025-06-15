@@ -23,8 +23,9 @@ from starlette.middleware.sessions import SessionMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from strands import Agent
-from strands_tools import use_llm
+# Using the memory tool again
 from strands_tools.memory import memory as bedrock_kb_memory_tool
+from strands_tools import use_llm
 from strands.models import BedrockModel
 
 # Configure logging
@@ -68,13 +69,13 @@ app.add_middleware(
 DEFAULT_REGION = "us-east-1"
 DEFAULT_MODEL_ID = "us.amazon.nova-micro-v1:0"
 INITIAL_GREETING = "Hi there, I am your AI agent here to help."
-SYSTEM_PROMPT = """You are a helpful assistant specializing in SUSTAINABILITY IN INFRASTRUCTURES. Your knowledge base contains information on this topic.
+SYSTEM_PROMPT = """You are a specialized assistant for SUSTAINABILITY IN INFRASTRUCTURES. Your function is to answer questions based *only* on information from the provided knowledge base context.
 
-First, determine if the user's query is related to sustainability in infrastructures.
-- If the query is related, use the knowledge base to provide a comprehensive answer.
-- If the query is NOT related (e.g., a simple greeting, a question about a different topic), you MUST respond with: "I was not developed to answer this question. Please ask me about sustainability in infrastructures."
-
-Be kind and professional in all your responses.
+Follow these rules strictly:
+1.  Examine the user's query and the provided knowledge base context.
+2.  If the context contains a relevant answer to the query, provide a concise answer based ONLY on that context.
+3.  If the user's query is off-topic (e.g., "what is your name?", "hello") OR if the provided context is NOT relevant to the query, you MUST respond with this exact phrase: "I can only answer questions about sustainability in infrastructures based on my knowledge base."
+4.  Do NOT provide any information that is not from the context. Do not apologize. Do not list irrelevant context.
 """
 
 bedrock_model_instance = BedrockModel(
@@ -129,9 +130,10 @@ async def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
             "name": f"Mock User {MOCK_USER_ID_COUNTER}"
         }
     return request.session["mock_user"]
-
-async def _create_new_agent_session(user_id: str, model_id: str, region: str) -> str:
+async def _create_new_agent_session(user_id: str) -> str:
     session_id = secrets.token_urlsafe(16)
+    region = DEFAULT_REGION
+    model_id = DEFAULT_MODEL_ID
 
     bedrock_model_instance = BedrockModel(
         model_id=model_id,
@@ -139,16 +141,16 @@ async def _create_new_agent_session(user_id: str, model_id: str, region: str) ->
         system_prompt=SYSTEM_PROMPT
     )
 
-    # Pass the BedrockModel instance to the Agent
+    # Pass the BedrockModel instance and the memory tool to the Agent
     agent = Agent(model=bedrock_model_instance, tools=[use_llm, bedrock_kb_memory_tool])
-    logger.info(f"Session {session_id}: Strands Agent initialized with model {model_id}, tools for region {region}.")
+    logger.info(f"Session {session_id}: Strands Agent initialized with model {model_id}, using memory tool for region {region}.")
 
     initial_greeting_html = format_response_html(INITIAL_GREETING)
 
     agent_sessions[session_id] = {
         "agent": agent,
         "region": region,
-        "model_id": model_id,
+        "model_id": bedrock_model_instance,
         "chat_history": [{
             "sender": "agent",
             "query": None,
@@ -174,7 +176,7 @@ async def main_chat_page(request: Request):
             return templates.TemplateResponse("error_page.html", {"request": request, "error_message": "Chat service is currently unavailable. Knowledge Base not configured."}, status_code=503)
 
         try:
-            agent_session_id = await _create_new_agent_session(user_id, DEFAULT_MODEL_ID, DEFAULT_REGION)
+            agent_session_id = await _create_new_agent_session(user_id)
             request.session["agent_session_id"] = agent_session_id
         except Exception as e:
             logger.error(f"Failed to create new agent session for user {user_id}: {e}", exc_info=True)
@@ -184,7 +186,7 @@ async def main_chat_page(request: Request):
     if not current_agent_session:
         logger.error(f"Agent session {agent_session_id} not found in agent_sessions dict after creation/retrieval.")
         try:
-            agent_session_id = await _create_new_agent_session(user_id, DEFAULT_MODEL_ID, DEFAULT_REGION)
+            agent_session_id = await _create_new_agent_session(user_id)
             request.session["agent_session_id"] = agent_session_id
             current_agent_session = agent_sessions.get(agent_session_id)
             if not current_agent_session:
@@ -203,7 +205,7 @@ async def main_chat_page(request: Request):
 def _extract_main_text_from_llm_output(llm_output: Any) -> str:
     """
     Helper function to robustly extract the primary text content
-    from the llm_tool_output, specifically looking for the text after "Response: ".
+    from the llm_tool_output.
     """
     processed_text = ""
     if isinstance(llm_output, dict):
@@ -213,25 +215,18 @@ def _extract_main_text_from_llm_output(llm_output: Any) -> str:
             if isinstance(first_content_item, dict):
                 text_val = first_content_item.get('text')
                 if isinstance(text_val, str):
-                    # Check for "Response: " prefix and strip it
-                    prefix_to_strip = "Response: "
-                    if text_val.startswith(prefix_to_strip):
-                        processed_text = text_val[len(prefix_to_strip):].strip()
-                    else:
-                        processed_text = text_val # Use as is if prefix not found
-            # Fallback if first content item didn't yield text as expected
+                    processed_text = text_val.strip()
             if not processed_text:
                 text_val_top = llm_output.get('text')
                 if isinstance(text_val_top, str):
                     processed_text = text_val_top
                 else:
-                    content_val_top = llm_output.get('content') # Could be a string if not a list
+                    content_val_top = llm_output.get('content')
                     if isinstance(content_val_top, str):
                         processed_text = content_val_top
     elif isinstance(llm_output, str):
         processed_text = llm_output
 
-    # Final fallback: if still no string, convert the whole output
     if not isinstance(processed_text, str) or not processed_text:
         if llm_output is not None:
             processed_text = str(llm_output)
@@ -246,7 +241,8 @@ async def stream_agent_response(agent: Agent, prompt: str, session_id: str, quer
     processed_llm_text_output = ""
     try:
         loop = asyncio.get_event_loop()
-        llm_tool_output = await loop.run_in_executor(executor, lambda: agent.tool.use_llm(prompt=prompt))
+        llm_tool_output = await loop.run_in_executor(executor, lambda: agent.tool.use_llm(prompt=prompt, system_prompt=SYSTEM_PROMPT))
+
 
         processed_llm_text_output = _extract_main_text_from_llm_output(llm_tool_output)
 
@@ -296,6 +292,7 @@ async def web_query_stream(request: Request, session_id: str = Form(...), query:
 
     try:
         logger.info(f"Session {session_id}: Attempting KB retrieval for query: '{query}' using KB ID: {STRANDS_KNOWLEDGE_BASE_ID}")
+        # Using agent.tool.memory with action='retrieve'
         retrieved_data_raw = await loop.run_in_executor(
             executor,
             lambda: agent.tool.memory(
@@ -323,18 +320,16 @@ async def web_query_stream(request: Request, session_id: str = Form(...), query:
         if not contexts:
             logger.info(f"Session {session_id}: No relevant information found in KB for '{query}'.")
             final_prompt_for_llm = (
-                f"The user asked: \"{query}\"\n"
-                f"I could not find an answer to this in my knowledge base. "
-                f"Please respond by stating that you are an agent with a specific knowledge base and this query is outside of what you were trained on, "
-                f"or that you couldn't find the specific information."
+                f"The user asked: \"{query}\". No information was found in the knowledge base. "
+                "Follow your instructions for how to respond when no relevant information is available."
             )
         else:
             context_str = "\n\n---\n\n".join(contexts)
             final_prompt_for_llm = (
-                f"Based on the following information from the knowledge base:\n{context_str}\n\n"
-                f"Please provide a concise answer to the user's query: \"{query}\"\n"
-                f"If the context is sufficient, answer directly. If the context seems related but not a direct answer, "
-                f"summarize the relevant findings. If the context is clearly not relevant, state that you couldn't find a specific answer in the provided information."
+                f"Use the following knowledge base context to answer the user's query.\n\n"
+                f"Context:\n{context_str}\n\n"
+                f"User Query: \"{query}\"\n\n"
+                "Remember to follow your rules strictly: if the context is not relevant, you must decline to answer."
             )
             logger.info(f"Session {session_id}: Generating response using RAG with {len(contexts)} context(s).")
 
@@ -342,8 +337,8 @@ async def web_query_stream(request: Request, session_id: str = Form(...), query:
 
     except Exception as e:
         logger.error(f"Session {session_id}: Pre-stream error for query '{query}': {str(e)}", exc_info=True)
-        async def error_stream_main():
-            error_msg = f"Error preparing your request: {str(e)}"
+        async def error_stream_main(exc: Exception):
+            error_msg = f"Error preparing your request: {str(exc)}"
             escaped_error_msg = error_msg.replace("\n", "\\n")
             yield f"data: {json.dumps({'type': 'error', 'content': escaped_error_msg})}\n\n"
             if session_id in agent_sessions:
@@ -353,9 +348,9 @@ async def web_query_stream(request: Request, session_id: str = Form(...), query:
                     "response": f"[Error: {error_msg}]",
                     "formatted_response": format_response_html(f"[Error: {error_msg}]")
                 })
-        return StreamingResponse(error_stream_main(), media_type="text/event-stream")
+        return StreamingResponse(error_stream_main(e), media_type="text/event-stream")
 
-# Non-streaming API endpoints (kept for potential other uses, but web UI uses streaming)
+# Non-streaming API endpoints
 @app.post("/connect", response_model=ConnectResponse)
 async def api_connect(apiRequestData: ConnectApiRequest, request: Request):
     user = await get_current_user(request)
@@ -364,8 +359,8 @@ async def api_connect(apiRequestData: ConnectApiRequest, request: Request):
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Knowledge Base is not configured on the server.")
     try:
         user_id_for_session = user.get("id", "api_anonymous_user") if user else "api_anonymous_user"
-        session_id = await _create_new_agent_session(user_id_for_session, apiRequestData.model_id, apiRequestData.region)
-        return ConnectResponse(session_id=session_id, message=f"Agent session created successfully with model {apiRequestData.model_id}")
+        session_id = await _create_new_agent_session(user_id_for_session)
+        return ConnectResponse(session_id=session_id, message=f"Agent session created successfully with model {DEFAULT_MODEL_ID}")
     except Exception as e:
         logger.error(f"API /connect error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create agent session: {str(e)}")
@@ -383,6 +378,7 @@ async def api_query_non_streaming(query_request: QueryRequest, request: Request)
     query = query_request.query
     try:
         logger.info(f"API NPO-STREAM Session {query_request.session_id}: Attempting KB retrieval for query: '{query}'")
+        # Using agent.tool.memory with action='retrieve'
         retrieved_data_raw = await loop.run_in_executor(
             executor,
             lambda: agent.tool.memory(action="retrieve", query=query, knowledge_base_id=STRANDS_KNOWLEDGE_BASE_ID, max_results=3)
@@ -398,16 +394,19 @@ async def api_query_non_streaming(query_request: QueryRequest, request: Request)
         final_prompt_for_llm = ""
         if not contexts:
             final_prompt_for_llm = (
-                f"The user asked: \"{query}\"\n"
-                f"I could not find an answer to this in my knowledge base. "
-                f"Please respond by stating that you are an agent with a specific knowledge base and this query is outside of what you were trained on, "
-                f"or that you couldn't find the specific information."
+                f"The user asked: \"{query}\". No information was found in the knowledge base. "
+                "Follow your instructions for how to respond when no relevant information is available."
             )
         else:
             context_str = "\n\n---\n\n".join(contexts)
-            final_prompt_for_llm = (f"Context:\n{context_str}\n\nQuery: {query}\n\nAnswer concisely.")
+            final_prompt_for_llm = (
+                f"Use the following knowledge base context to answer the user's query.\n\n"
+                f"Context:\n{context_str}\n\n"
+                f"User Query: \"{query}\"\n\n"
+                "Remember to follow your rules strictly: if the context is not relevant, you must decline to answer."
+            )
 
-        llm_tool_output_sync = await loop.run_in_executor(executor, lambda: agent.tool.use_llm(prompt=final_prompt_for_llm))
+        llm_tool_output_sync = await loop.run_in_executor(executor, lambda: agent(final_prompt_for_llm))
 
         response_text = _extract_main_text_from_llm_output(llm_tool_output_sync)
 
