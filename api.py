@@ -4,7 +4,7 @@ import os
 import secrets
 import base64
 import json
-import markdown 
+import markdown
 import concurrent.futures
 from typing import Dict, List, Optional, Any, AsyncGenerator, Tuple
 from urllib.parse import urlencode
@@ -13,19 +13,19 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-import requests 
+import requests
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Form, Depends, status
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from starlette.middleware.sessions import SessionMiddleware 
+from starlette.middleware.sessions import SessionMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 from strands import Agent
 from strands_tools import use_llm
 from strands_tools.memory import memory as bedrock_kb_memory_tool
-from strands.models import BedrockModel 
+from strands.models import BedrockModel
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -54,13 +54,13 @@ agent_sessions: Dict[str, Dict[str, Any]] = {}
 # Knowledge Base ID (Still needed)
 STRANDS_KNOWLEDGE_BASE_ID = os.environ.get("STRANDS_KNOWLEDGE_BASE_ID")
 
-if not STRANDS_KNOWLEDGE_BASE_ID: 
+if not STRANDS_KNOWLEDGE_BASE_ID:
     logger.error("CRITICAL: STRANDS_KNOWLEDGE_BASE_ID environment variable is not set. Knowledge base functionality will fail.")
 
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.environ.get("SESSION_SECRET_KEY", secrets.token_urlsafe(32)),
-    session_cookie="strands_chat_session", 
+    session_cookie="strands_chat_session",
     max_age=3600 * 8 # 8 hours session
 )
 
@@ -97,7 +97,7 @@ class ConnectResponse(BaseModel):
     session_id: str
     message: str
 
-class QueryResponse(BaseModel): 
+class QueryResponse(BaseModel):
     response: str
     formatted_response: Optional[str] = None
 # --- End Pydantic Models ---
@@ -125,15 +125,14 @@ async def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
         MOCK_USER_ID_COUNTER += 1
         request.session["mock_user"] = {
             "id": f"mock_user_{MOCK_USER_ID_COUNTER}_{secrets.token_hex(4)}",
-            "email": f"mock_user_{MOCK_USER_ID_COUNTER}@example.com", 
-            "name": f"Mock User {MOCK_USER_ID_COUNTER}" 
+            "email": f"mock_user_{MOCK_USER_ID_COUNTER}@example.com",
+            "name": f"Mock User {MOCK_USER_ID_COUNTER}"
         }
     return request.session["mock_user"]
-async def _create_new_agent_session(user_id: str) -> str:
+
+async def _create_new_agent_session(user_id: str, model_id: str, region: str) -> str:
     session_id = secrets.token_urlsafe(16)
-    region = DEFAULT_REGION
-    model_id = DEFAULT_MODEL_ID
-    
+
     bedrock_model_instance = BedrockModel(
         model_id=model_id,
         region=region,
@@ -143,19 +142,19 @@ async def _create_new_agent_session(user_id: str) -> str:
     # Pass the BedrockModel instance to the Agent
     agent = Agent(model=bedrock_model_instance, tools=[use_llm, bedrock_kb_memory_tool])
     logger.info(f"Session {session_id}: Strands Agent initialized with model {model_id}, tools for region {region}.")
-    
+
     initial_greeting_html = format_response_html(INITIAL_GREETING)
-    
+
     agent_sessions[session_id] = {
-        "agent": agent, 
-        "region": region, 
-        "model_id": bedrock_model_instance, 
+        "agent": agent,
+        "region": region,
+        "model_id": model_id,
         "chat_history": [{
-            "sender": "agent", 
-            "query": None, 
+            "sender": "agent",
+            "query": None,
             "response": INITIAL_GREETING,
             "formatted_response": initial_greeting_html
-        }], 
+        }],
         "user_id": user_id
     }
     logger.info(f"Session {session_id} created for user {user_id}. KB ID: {STRANDS_KNOWLEDGE_BASE_ID}. Model: {model_id}, Region: {region}")
@@ -163,32 +162,32 @@ async def _create_new_agent_session(user_id: str) -> str:
 
 @app.get("/", response_class=HTMLResponse)
 async def main_chat_page(request: Request):
-    user = await get_current_user(request) 
+    user = await get_current_user(request)
     user_id = user["id"]
     agent_session_id = request.session.get("agent_session_id")
-    
+
     if agent_session_id and agent_session_id in agent_sessions:
         logger.info(f"User {user_id} returning to existing agent session: {agent_session_id}")
     else:
         if not STRANDS_KNOWLEDGE_BASE_ID:
             logger.error("Cannot create new agent session: STRANDS_KNOWLEDGE_BASE_ID not set.")
             return templates.TemplateResponse("error_page.html", {"request": request, "error_message": "Chat service is currently unavailable. Knowledge Base not configured."}, status_code=503)
-        
+
         try:
-            agent_session_id = await _create_new_agent_session(user_id)
-            request.session["agent_session_id"] = agent_session_id 
+            agent_session_id = await _create_new_agent_session(user_id, DEFAULT_MODEL_ID, DEFAULT_REGION)
+            request.session["agent_session_id"] = agent_session_id
         except Exception as e:
             logger.error(f"Failed to create new agent session for user {user_id}: {e}", exc_info=True)
             return templates.TemplateResponse("error_page.html", {"request": request, "error_message": "Could not start a new chat session."}, status_code=500)
 
     current_agent_session = agent_sessions.get(agent_session_id)
-    if not current_agent_session: 
+    if not current_agent_session:
         logger.error(f"Agent session {agent_session_id} not found in agent_sessions dict after creation/retrieval.")
         try:
-            agent_session_id = await _create_new_agent_session(user_id)
+            agent_session_id = await _create_new_agent_session(user_id, DEFAULT_MODEL_ID, DEFAULT_REGION)
             request.session["agent_session_id"] = agent_session_id
             current_agent_session = agent_sessions.get(agent_session_id)
-            if not current_agent_session: 
+            if not current_agent_session:
                  return templates.TemplateResponse("error_page.html", {"request": request, "error_message": "Failed to initialize chat session. Please try again."}, status_code=500)
         except Exception as e:
             logger.error(f"Fallback session creation failed for user {user_id}: {e}", exc_info=True)
@@ -196,14 +195,14 @@ async def main_chat_page(request: Request):
 
     return templates.TemplateResponse("chat_ui.html", {
         "request": request,
-        "session_id": agent_session_id, 
+        "session_id": agent_session_id,
         "chat_history": current_agent_session["chat_history"]
     })
 
 
 def _extract_main_text_from_llm_output(llm_output: Any) -> str:
     """
-    Helper function to robustly extract the primary text content 
+    Helper function to robustly extract the primary text content
     from the llm_tool_output, specifically looking for the text after "Response: ".
     """
     processed_text = ""
@@ -231,7 +230,7 @@ def _extract_main_text_from_llm_output(llm_output: Any) -> str:
                         processed_text = content_val_top
     elif isinstance(llm_output, str):
         processed_text = llm_output
-    
+
     # Final fallback: if still no string, convert the whole output
     if not isinstance(processed_text, str) or not processed_text:
         if llm_output is not None:
@@ -244,20 +243,20 @@ def _extract_main_text_from_llm_output(llm_output: Any) -> str:
 
 async def stream_agent_response(agent: Agent, prompt: str, session_id: str, query_text: str) -> AsyncGenerator[str, None]:
     full_response_parts = []
-    processed_llm_text_output = "" 
+    processed_llm_text_output = ""
     try:
         loop = asyncio.get_event_loop()
         llm_tool_output = await loop.run_in_executor(executor, lambda: agent.tool.use_llm(prompt=prompt))
-        
+
         processed_llm_text_output = _extract_main_text_from_llm_output(llm_tool_output)
 
         logger.debug(f"Session {session_id}: Raw LLM tool output type: {type(llm_tool_output)}, content: {llm_tool_output}")
         logger.debug(f"Session {session_id}: Processed text for streaming: {processed_llm_text_output}")
 
-        if processed_llm_text_output: 
-            full_response_parts.append(processed_llm_text_output) 
+        if processed_llm_text_output:
+            full_response_parts.append(processed_llm_text_output)
             escaped_response_text = processed_llm_text_output.replace("\n", "\\n")
-            yield f"data: {json.dumps({'type': 'chunk', 'content': escaped_response_text})}\n\n" 
+            yield f"data: {json.dumps({'type': 'chunk', 'content': escaped_response_text})}\n\n"
 
         yield f"data: {json.dumps({'type': 'end'})}\n\n"
 
@@ -266,23 +265,23 @@ async def stream_agent_response(agent: Agent, prompt: str, session_id: str, quer
         error_message = f"Sorry, an error occurred: {str(e)}"
         escaped_error_message = error_message.replace("\n", "\\n")
         yield f"data: {json.dumps({'type': 'error', 'content': escaped_error_message})}\n\n"
-        full_response_parts.append(f"[Error: {error_message}]") 
+        full_response_parts.append(f"[Error: {error_message}]")
     finally:
         if session_id in agent_sessions:
             safe_parts = [str(part) for part in full_response_parts]
-            final_response_for_history = "".join(safe_parts) 
-            
-            formatted_html_response = format_response_html(final_response_for_history) 
+            final_response_for_history = "".join(safe_parts)
+
+            formatted_html_response = format_response_html(final_response_for_history)
             agent_sessions[session_id]["chat_history"].append({
-                "sender": "user", 
+                "sender": "user",
                 "query": query_text,
-                "response": final_response_for_history, 
+                "response": final_response_for_history,
                 "formatted_response": formatted_html_response
             })
             logger.info(f"Session {session_id}: Saved user query and agent response to history.")
 
 
-@app.post("/web/query", response_class=StreamingResponse) 
+@app.post("/web/query", response_class=StreamingResponse)
 async def web_query_stream(request: Request, session_id: str = Form(...), query: str = Form(...)):
     session_data = agent_sessions.get(session_id)
 
@@ -293,33 +292,33 @@ async def web_query_stream(request: Request, session_id: str = Form(...), query:
         return StreamingResponse(error_stream(), media_type="text/event-stream")
 
     agent: Agent = session_data["agent"]
-    loop = asyncio.get_event_loop() 
+    loop = asyncio.get_event_loop()
 
     try:
         logger.info(f"Session {session_id}: Attempting KB retrieval for query: '{query}' using KB ID: {STRANDS_KNOWLEDGE_BASE_ID}")
         retrieved_data_raw = await loop.run_in_executor(
-            executor, 
+            executor,
             lambda: agent.tool.memory(
-                action="retrieve", 
-                query=query, 
-                knowledge_base_id=STRANDS_KNOWLEDGE_BASE_ID, 
-                max_results=3 
+                action="retrieve",
+                query=query,
+                knowledge_base_id=STRANDS_KNOWLEDGE_BASE_ID,
+                max_results=3
             )
         )
         logger.debug(f"Session {session_id}: Retrieved data from KB (raw): {retrieved_data_raw}")
-        
+
         contexts = []
         if isinstance(retrieved_data_raw, list):
             for item in retrieved_data_raw:
                 if isinstance(item, dict) and 'text' in item and isinstance(item['text'], str):
                     contexts.append(item['text'])
-                elif isinstance(item, str): 
+                elif isinstance(item, str):
                     contexts.append(item)
         elif isinstance(retrieved_data_raw, dict) and 'text' in retrieved_data_raw and isinstance(retrieved_data_raw['text'], str):
              contexts.append(retrieved_data_raw['text'])
         elif isinstance(retrieved_data_raw, str):
              contexts.append(retrieved_data_raw)
-        
+
         final_prompt_for_llm = ""
         if not contexts:
             logger.info(f"Session {session_id}: No relevant information found in KB for '{query}'.")
@@ -338,54 +337,54 @@ async def web_query_stream(request: Request, session_id: str = Form(...), query:
                 f"summarize the relevant findings. If the context is clearly not relevant, state that you couldn't find a specific answer in the provided information."
             )
             logger.info(f"Session {session_id}: Generating response using RAG with {len(contexts)} context(s).")
-        
+
         return StreamingResponse(stream_agent_response(agent, final_prompt_for_llm, session_id, query), media_type="text/event-stream")
 
     except Exception as e:
         logger.error(f"Session {session_id}: Pre-stream error for query '{query}': {str(e)}", exc_info=True)
-        async def error_stream_main(): 
+        async def error_stream_main():
             error_msg = f"Error preparing your request: {str(e)}"
             escaped_error_msg = error_msg.replace("\n", "\\n")
             yield f"data: {json.dumps({'type': 'error', 'content': escaped_error_msg})}\n\n"
-            if session_id in agent_sessions: 
+            if session_id in agent_sessions:
                  agent_sessions[session_id]["chat_history"].append({
-                    "sender": "user", 
-                    "query": query, 
-                    "response": f"[Error: {error_msg}]", 
+                    "sender": "user",
+                    "query": query,
+                    "response": f"[Error: {error_msg}]",
                     "formatted_response": format_response_html(f"[Error: {error_msg}]")
                 })
         return StreamingResponse(error_stream_main(), media_type="text/event-stream")
 
 # Non-streaming API endpoints (kept for potential other uses, but web UI uses streaming)
-@app.post("/connect", response_model=ConnectResponse) 
+@app.post("/connect", response_model=ConnectResponse)
 async def api_connect(apiRequestData: ConnectApiRequest, request: Request):
-    user = await get_current_user(request) 
+    user = await get_current_user(request)
     if not STRANDS_KNOWLEDGE_BASE_ID:
         logger.error("API /connect: STRANDS_KNOWLEDGE_BASE_ID not set.")
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Knowledge Base is not configured on the server.")
     try:
         user_id_for_session = user.get("id", "api_anonymous_user") if user else "api_anonymous_user"
-        session_id = await _create_new_agent_session(user_id_for_session) 
-        return ConnectResponse(session_id=session_id, message=f"Agent session created successfully with model {DEFAULT_MODEL_ID}")
+        session_id = await _create_new_agent_session(user_id_for_session, apiRequestData.model_id, apiRequestData.region)
+        return ConnectResponse(session_id=session_id, message=f"Agent session created successfully with model {apiRequestData.model_id}")
     except Exception as e:
         logger.error(f"API /connect error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create agent session: {str(e)}")
 
-@app.post("/query", response_model=QueryResponse) 
-async def api_query_non_streaming(query_request: QueryRequest, request: Request): 
+@app.post("/query", response_model=QueryResponse)
+async def api_query_non_streaming(query_request: QueryRequest, request: Request):
     user = await get_current_user(request)
     session_data = agent_sessions.get(query_request.session_id)
     if not session_data or not session_data.get("agent"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found or expired.")
 
     agent: Agent = session_data["agent"]
-    llm_tool_output_sync = "" 
+    llm_tool_output_sync = ""
     loop = asyncio.get_event_loop()
-    query = query_request.query 
+    query = query_request.query
     try:
         logger.info(f"API NPO-STREAM Session {query_request.session_id}: Attempting KB retrieval for query: '{query}'")
         retrieved_data_raw = await loop.run_in_executor(
-            executor, 
+            executor,
             lambda: agent.tool.memory(action="retrieve", query=query, knowledge_base_id=STRANDS_KNOWLEDGE_BASE_ID, max_results=3)
         )
         contexts = []
@@ -407,9 +406,9 @@ async def api_query_non_streaming(query_request: QueryRequest, request: Request)
         else:
             context_str = "\n\n---\n\n".join(contexts)
             final_prompt_for_llm = (f"Context:\n{context_str}\n\nQuery: {query}\n\nAnswer concisely.")
-        
+
         llm_tool_output_sync = await loop.run_in_executor(executor, lambda: agent.tool.use_llm(prompt=final_prompt_for_llm))
-        
+
         response_text = _extract_main_text_from_llm_output(llm_tool_output_sync)
 
     except Exception as e:
@@ -418,20 +417,20 @@ async def api_query_non_streaming(query_request: QueryRequest, request: Request)
 
     formatted_response = format_response_html(response_text)
     session_data.setdefault("chat_history", []).append({
-        "sender": "user", 
-        "query": query, 
-        "response": response_text, 
+        "sender": "user",
+        "query": query,
+        "response": response_text,
         "formatted_response": formatted_response
     })
     return QueryResponse(response=response_text, formatted_response=formatted_response)
 
-@app.delete("/session/{session_id}") 
+@app.delete("/session/{session_id}")
 async def cleanup_session_endpoint(session_id: str, request: Request):
-    user = await get_current_user(request) 
+    user = await get_current_user(request)
     if session_id in agent_sessions:
         current_user_id = user.get("id") if user else "unknown_api_user"
         del agent_sessions[session_id]
-        request.session.pop("agent_session_id", None) 
+        request.session.pop("agent_session_id", None)
         logger.info(f"Session {session_id} cleaned up by user {current_user_id}.")
         return JSONResponse({"message": "Session cleaned up successfully."})
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")
@@ -452,7 +451,7 @@ if __name__ == "__main__":
     if not os.path.exists(templates_main_dir):
         os.makedirs(templates_main_dir, exist_ok=True)
         logger.info(f"Created directory: {templates_main_dir}")
-        
+
     if not os.path.exists(static_main_dir):
         os.makedirs(static_main_dir, exist_ok=True)
         logger.info(f"Created directory: {static_main_dir}")
@@ -460,7 +459,7 @@ if __name__ == "__main__":
     if not os.path.exists(css_dir):
         os.makedirs(css_dir, exist_ok=True)
         logger.info(f"Created directory: {css_dir}")
-        
+
     port = int(os.environ.get("PORT", 5001))
-    host = os.environ.get("HOST", "0.0.0.0") 
+    host = os.environ.get("HOST", "0.0.0.0")
     uvicorn.run("api:app", host=host, port=port, timeout_keep_alive=300, reload=True)
