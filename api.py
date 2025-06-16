@@ -148,11 +148,13 @@ async def _create_new_agent_session(user_id: str) -> str:
         region=region,
         system_prompt=SYSTEM_PROMPT
     )
-
     # Pass the BedrockModel instance and the memory tool to the Agent
     agent = Agent(model=bedrock_model_instance, tools=[use_llm, bedrock_kb_memory_tool])
     logger.info(f"Session {session_id}: Strands Agent initialized with model {model_id}, using memory tool for region {region}.")
-
+    actual_model_id = bedrock_model_instance.config.get('model_id', 'unknown')
+    actual_region = bedrock_model_instance.config.get('region', 'unknown')
+    
+    logger.info(f"Session {session_id}: Strands Agent initialized with model {actual_model_id} in region {actual_region}. Model instance type: {type(bedrock_model_instance)}")
     initial_greeting_html = format_response_html(INITIAL_GREETING)
 
     agent_sessions[session_id] = {
