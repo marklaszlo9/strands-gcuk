@@ -32,6 +32,14 @@ from strands.models import BedrockModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("strands-agent-api")
 
+# Define and add filter to suppress /health logs from uvicorn.access
+def health_check_filter(record: logging.LogRecord) -> bool:
+    return record.getMessage().find("/health") == -1
+
+uvicorn_access_logger = logging.getLogger("uvicorn.access")
+uvicorn_access_logger.addFilter(health_check_filter)
+
+
 app = FastAPI(title="Strands Agent Chat UI")
 
 # Add middleware for compression
@@ -242,7 +250,6 @@ async def stream_agent_response(agent: Agent, prompt: str, session_id: str, quer
     try:
         loop = asyncio.get_event_loop()
         llm_tool_output = await loop.run_in_executor(executor, lambda: agent.tool.use_llm(prompt=prompt, system_prompt=SYSTEM_PROMPT))
-
 
         processed_llm_text_output = _extract_main_text_from_llm_output(llm_tool_output)
 
