@@ -77,13 +77,13 @@ app.add_middleware(
 DEFAULT_REGION = "us-east-1"
 DEFAULT_MODEL_ID = "us.amazon.nova-micro-v1:0"
 INITIAL_GREETING = "Hi there, I am your AI agent here to help."
-SYSTEM_PROMPT = """You are a specialized assistant for SUSTAINABILITY IN INFRASTRUCTURES. Your function is to answer questions based *only* on information from the provided knowledge base context.
+SYSTEM_PROMPT = """You are an expert assistant on the Envision Sustainable Infrastructure Framework Version 3. Your sole purpose is to answer questions based on the content of the provided 'ISI Envision.pdf' manual.
 
-Follow these rules strictly:
-1.  Examine the user's query and the provided knowledge base context.
-2.  If the context contains a relevant answer to the query, provide a concise answer based ONLY on that context.
-3.  If the user's query is off-topic (e.g., "what is your name?", "hello") OR if the provided context is NOT relevant to the query, you MUST respond with this exact phrase: "I can only answer questions about sustainability in infrastructures based on my knowledge base."
-4.  Do NOT provide any information that is not from the context. Do not apologize. Do not list irrelevant context.
+Follow these instructions precisely:
+1.  When a user asks a question, find the answer *only* within the provided knowledge base context from the Envision manual.
+2.  Provide clear, accurate, and concise answers based strictly on the information found in the document. You may quote or paraphrase from the text.
+3.  If the user's question cannot be answered using the Envision manual, you must state that you can only answer questions about the Envision Sustainable Infrastructure Framework. Do not use any external knowledge or make assumptions.
+4.  If the query is conversational (e.g., "hello", "thank you"), you may respond politely but briefly.
 """
 
 bedrock_model_instance = BedrockModel(
@@ -91,6 +91,7 @@ bedrock_model_instance = BedrockModel(
         region=DEFAULT_REGION,
         system_prompt=SYSTEM_PROMPT
     )
+logger.debug(f"BedrockModel attributes: {dir(bedrock_model_instance)}")
 
 
 # --- Pydantic Models ---
@@ -148,13 +149,11 @@ async def _create_new_agent_session(user_id: str) -> str:
         region=region,
         system_prompt=SYSTEM_PROMPT
     )
+
     # Pass the BedrockModel instance and the memory tool to the Agent
     agent = Agent(model=bedrock_model_instance, tools=[use_llm, bedrock_kb_memory_tool])
     logger.info(f"Session {session_id}: Strands Agent initialized with model {model_id}, using memory tool for region {region}.")
-    actual_model_id = bedrock_model_instance.config.get('model_id', 'unknown')
-    actual_region = bedrock_model_instance.config.get('region', 'unknown')
-    
-    logger.info(f"Session {session_id}: Strands Agent initialized with model {actual_model_id} in region {actual_region}. Model instance type: {type(bedrock_model_instance)}")
+
     initial_greeting_html = format_response_html(INITIAL_GREETING)
 
     agent_sessions[session_id] = {
@@ -251,7 +250,8 @@ async def stream_agent_response(agent: Agent, prompt: str, session_id: str, quer
     processed_llm_text_output = ""
     try:
         loop = asyncio.get_event_loop()
-        llm_tool_output = await loop.run_in_executor(executor, lambda: agent.tool.use_llm(prompt=prompt, system_prompt=SYSTEM_PROMPT))
+        llm_tool_future = loop.run_in_executor(executor, lambda: agent.tool.use_llm(prompt=prompt, system_prompt=SYSTEM_PROMPT))
+        llm_tool_output = await asyncio.wait_for(llm_tool_future, timeout=120.0)
 
         processed_llm_text_output = _extract_main_text_from_llm_output(llm_tool_output)
 
@@ -265,6 +265,12 @@ async def stream_agent_response(agent: Agent, prompt: str, session_id: str, quer
 
         yield f"data: {json.dumps({'type': 'end'})}\n\n"
 
+    except asyncio.TimeoutError:
+        logger.error(f"Session {session_id}: LLM response generation timed out.")
+        error_message = "Sorry, the request timed out while generating a response. Please try rephrasing your question."
+        escaped_error_message = error_message.replace("\n", "\\n")
+        yield f"data: {json.dumps({'type': 'error', 'content': escaped_error_message})}\n\n"
+        full_response_parts.append(f"[Error: {error_message}]")
     except Exception as e:
         logger.error(f"Session {session_id}: Error during agent response streaming: {str(e)}", exc_info=True)
         error_message = f"Sorry, an error occurred: {str(e)}"
@@ -301,8 +307,8 @@ async def web_query_stream(request: Request, session_id: str = Form(...), query:
 
     try:
         logger.info(f"Session {session_id}: Attempting KB retrieval for query: '{query}' using KB ID: {STRANDS_KNOWLEDGE_BASE_ID}")
-        # Using agent.tool.memory with action='retrieve'
-        retrieved_data_raw = await loop.run_in_executor(
+        
+        retrieved_data_future = loop.run_in_executor(
             executor,
             lambda: agent.tool.memory(
                 action="retrieve",
@@ -311,6 +317,8 @@ async def web_query_stream(request: Request, session_id: str = Form(...), query:
                 max_results=3
             )
         )
+        retrieved_data_raw = await asyncio.wait_for(retrieved_data_future, timeout=30.0)
+        
         logger.debug(f"Session {session_id}: Retrieved data from KB (raw): {retrieved_data_raw}")
 
         contexts = []
@@ -343,7 +351,14 @@ async def web_query_stream(request: Request, session_id: str = Form(...), query:
             logger.info(f"Session {session_id}: Generating response using RAG with {len(contexts)} context(s).")
 
         return StreamingResponse(stream_agent_response(agent, final_prompt_for_llm, session_id, query), media_type="text/event-stream")
-
+    
+    except asyncio.TimeoutError:
+        logger.error(f"Session {session_id}: Knowledge base retrieval for query '{query}' timed out.")
+        async def error_stream_timeout():
+            error_msg = "Sorry, the request timed out while searching for information. Please try again."
+            escaped_error_msg = error_msg.replace("\n", "\\n")
+            yield f"data: {json.dumps({'type': 'error', 'content': escaped_error_msg})}\n\n"
+        return StreamingResponse(error_stream_timeout(), media_type="text/event-stream")
     except Exception as e:
         logger.error(f"Session {session_id}: Pre-stream error for query '{query}': {str(e)}", exc_info=True)
         async def error_stream_main(exc: Exception):
@@ -387,11 +402,13 @@ async def api_query_non_streaming(query_request: QueryRequest, request: Request)
     query = query_request.query
     try:
         logger.info(f"API NPO-STREAM Session {query_request.session_id}: Attempting KB retrieval for query: '{query}'")
-        # Using agent.tool.memory with action='retrieve'
-        retrieved_data_raw = await loop.run_in_executor(
+        
+        retrieved_data_future = loop.run_in_executor(
             executor,
             lambda: agent.tool.memory(action="retrieve", query=query, knowledge_base_id=STRANDS_KNOWLEDGE_BASE_ID, max_results=3)
         )
+        retrieved_data_raw = await asyncio.wait_for(retrieved_data_future, timeout=30.0)
+
         contexts = []
         if isinstance(retrieved_data_raw, list):
             for item in retrieved_data_raw:
@@ -415,10 +432,14 @@ async def api_query_non_streaming(query_request: QueryRequest, request: Request)
                 "Remember to follow your rules strictly: if the context is not relevant, you must decline to answer."
             )
 
-        llm_tool_output_sync = await loop.run_in_executor(executor, lambda: agent(final_prompt_for_llm))
+        llm_tool_future_sync = loop.run_in_executor(executor, lambda: agent(final_prompt_for_llm))
+        llm_tool_output_sync = await asyncio.wait_for(llm_tool_future_sync, timeout=120.0)
 
         response_text = _extract_main_text_from_llm_output(llm_tool_output_sync)
 
+    except asyncio.TimeoutError:
+        logger.error(f"API Session {query_request.session_id}: A part of the query processing timed out for query '{query}'.")
+        raise HTTPException(status_code=status.HTTP_408_REQUEST_TIMEOUT, detail="The request timed out while processing. Please try again.")
     except Exception as e:
         logger.error(f"API Session {query_request.session_id}: Error processing query '{query}': {str(e)}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error processing query: {str(e)}")
