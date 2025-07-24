@@ -25,7 +25,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from strands import Agent
 # Using the memory tool again
 from strands_tools.memory import memory as bedrock_kb_memory_tool
-from strands_tools import use_llm
+from strands_tools import use_agent
 from strands.models import BedrockModel
 
 # Configure logging
@@ -151,7 +151,7 @@ async def _create_new_agent_session(user_id: str) -> str:
     )
 
     # Pass the BedrockModel instance and the memory tool to the Agent
-    agent = Agent(model=bedrock_model_instance, tools=[use_llm, bedrock_kb_memory_tool])
+    agent = Agent(model=bedrock_model_instance, tools=[use_agent, bedrock_kb_memory_tool])
     logger.info(f"Session {session_id}: Strands Agent initialized with model {model_id}, using memory tool for region {region}.")
 
     initial_greeting_html = format_response_html(INITIAL_GREETING)
@@ -250,7 +250,13 @@ async def stream_agent_response(agent: Agent, prompt: str, session_id: str, quer
     processed_llm_text_output = ""
     try:
         loop = asyncio.get_event_loop()
-        llm_tool_future = loop.run_in_executor(executor, lambda: agent.tool.use_llm(prompt=prompt, system_prompt=SYSTEM_PROMPT))
+        llm_tool_future = loop.run_in_executor(executor, lambda: agent.tool.use_agent(
+            prompt=prompt, 
+            system_prompt=SYSTEM_PROMPT, 
+            model_provider="bedrock",  # Switch to Bedrock instead of parent's model
+            model_settings={
+                "model_id": "us.anthropic.claude-sonnet-4-20250514-v1:0"
+            }))
         llm_tool_output = await asyncio.wait_for(llm_tool_future, timeout=120.0)
 
         processed_llm_text_output = _extract_main_text_from_llm_output(llm_tool_output)
