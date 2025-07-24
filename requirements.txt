@@ -1,5 +1,5 @@
-strands-agents>=0.1.0
-strands-agents-tools>=0.1.0
+strands-agents
+strands-agents-tools
 anyio
 fastapi==0.115.12
 jinja2
