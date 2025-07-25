@@ -14,6 +14,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    - name: Debug Environment
+      run: |
+        echo "Listing files:"
+        ls -la
+        echo "Printing environment variables:"
+        printenv | grep STRANDS
 
     - name: Set up Python
       uses: actions/setup-python@v4
