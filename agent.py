@@ -1,228 +1,170 @@
 import asyncio
 import logging
 import os
-import secrets
-import base64
 import json
-import markdown
-import concurrent.futures
-from typing import Dict, List, Optional, Any, AsyncGenerator, Tuple
-from urllib.parse import urlencode
+from typing import Dict, Any, AsyncGenerator
+
 from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+import concurrent.futures
+
+from strands import Agent
+from strands_tools import use_agent
+from strands.models import BedrockModel
+
+# Using the memory tool for both KB and conversational memory
+from strands_tools.memory import memory as strands_memory_tool
 
 # Load environment variables from .env file
 load_dotenv()
 
-import requests
-from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
-
-from strands import Agent
-# Using the memory tool again
-from strands_tools.memory import memory as bedrock_kb_memory_tool
-from strands_tools import use_agent
-from strands.models import BedrockModel
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# --- Configuration ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("strands-agent-api")
 
-app = FastAPI(title="Strands Agent Server", version="1.0.0")
-
-# Create a thread pool executor for synchronous tool calls
-executor = concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
-
-# Knowledge Base ID (Still needed)
+# Required environment variables
 STRANDS_KNOWLEDGE_BASE_ID = os.environ.get("STRANDS_KNOWLEDGE_BASE_ID")
+AGENTCORE_MEMORY_ID = os.environ.get("AGENTCORE_MEMORY_ID")
 
 if not STRANDS_KNOWLEDGE_BASE_ID:
-    logger.error("CRITICAL: STRANDS_KNOWLEDGE_BASE_ID environment variable is not set. Knowledge base functionality will fail.")
+    logger.critical("FATAL: STRANDS_KNOWLEDGE_BASE_ID environment variable is not set.")
+if not AGENTCORE_MEMORY_ID:
+    logger.critical("FATAL: AGENTCORE_MEMORY_ID environment variable is not set.")
 
-# Hardcoded configuration
 DEFAULT_REGION = "us-east-1"
 DEFAULT_MODEL_ID = "us.amazon.nova-micro-v1:0"
-SYSTEM_PROMPT = """You are an expert assistant on the Envision Sustainable Infrastructure Framework Version 3. Your sole purpose is to answer questions based on the content of the provided 'ISI Envision.pdf' manual.
+SYSTEM_PROMPT = """You are an expert assistant on the Envision Sustainable Infrastructure Framework Version 3. Your sole purpose is to answer questions based on the content of the provided 'ISI Envision.pdf' manual and your conversation history.
 
-Follow these instructions precisely:
-1.  When a user asks a question, find the answer *only* within the provided knowledge base context from the Envision manual.
-2.  Provide clear, accurate, and concise answers based strictly on the information found in the document. You may quote or paraphrase from the text.
-3.  If the user's question cannot be answered using the Envision manual, you must state that you can only answer questions about the Envision Sustainable Infrastructure Framework. Do not use any external knowledge or make assumptions.
-4.  If the query is conversational (e.g., "hello", "thank you"), you may respond politely but briefly.
+Instructions:
+1.  First, consider the conversation history to understand the context of the current question.
+2.  Next, use the provided knowledge base context from the Envision manual to find the answer.
+3.  Provide clear, accurate answers based *only* on the document.
+4.  If the question cannot be answered from the manual, state that you can only answer questions about the Envision framework. Do not use external knowledge.
+5.  For conversational queries (e.g., "hello"), respond politely.
 """
 
-bedrock_model_instance = BedrockModel(
-        model_id=DEFAULT_MODEL_ID,
-        region=DEFAULT_REGION,
-        system_prompt=SYSTEM_PROMPT
-    )
-logger.debug(f"BedrockModel attributes: {dir(bedrock_model_instance)}")
+# --- FastAPI App & Models ---
+app = FastAPI(title="Strands Agent Server with AgentCore Memory", version="1.1.0")
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count() or 4)
 
-
-# --- Pydantic Models ---
 class InvocationRequest(BaseModel):
     query: str
+    session_id: str
 
-class InvocationResponse(BaseModel):
-    response: str
-# --- End Pydantic Models ---
+bedrock_model_instance = BedrockModel(
+    model_id=DEFAULT_MODEL_ID,
+    region=DEFAULT_REGION,
+    system_prompt=SYSTEM_PROMPT
+)
 
+# --- Core Logic ---
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("Shutting down thread pool executor.")
-    executor.shutdown(wait=True)
-    logger.info("Strands Agent API shutdown complete.")
+def _run_sync_tool(tool_func, *args, **kwargs):
+    """Helper to run synchronous tool functions in the executor."""
+    loop = asyncio.get_running_loop()
+    return loop.run_in_executor(executor, lambda: tool_func(*args, **kwargs))
 
-def _extract_main_text_from_llm_output(llm_output: Any) -> str:
-    """
-    Helper function to robustly extract the primary text content
-    from the llm_tool_output.
-    """
-    processed_text = ""
-    if isinstance(llm_output, dict):
-        content_list = llm_output.get('content')
-        if isinstance(content_list, list) and len(content_list) > 0:
-            first_content_item = content_list[0]
-            if isinstance(first_content_item, dict):
-                text_val = first_content_item.get('text')
-                if isinstance(text_val, str):
-                    processed_text = text_val.strip()
-            if not processed_text:
-                text_val_top = llm_output.get('text')
-                if isinstance(text_val_top, str):
-                    processed_text = text_val_top
-                else:
-                    content_val_top = llm_output.get('content')
-                    if isinstance(content_val_top, str):
-                        processed_text = content_val_top
-    elif isinstance(llm_output, str):
-        processed_text = llm_output
-
-    if not isinstance(processed_text, str) or not processed_text:
-        if llm_output is not None:
-            processed_text = str(llm_output)
-            logger.info(f"LLM output was complex or non-string, using its full string representation: {processed_text[:200]}...")
-        else:
-            processed_text = ""
-    return processed_text
-
-
-async def stream_agent_response(agent: Agent, prompt: str, query_text: str) -> AsyncGenerator[str, None]:
-    full_response_parts = []
-    processed_llm_text_output = ""
+async def stream_agent_response(agent: Agent, prompt: str, session_id: str, original_query: str) -> AsyncGenerator[str, None]:
+    """Streams the agent's final response and stores it in memory."""
+    full_response_text = ""
     try:
-        loop = asyncio.get_event_loop()
-        llm_tool_future = loop.run_in_executor(executor, lambda: agent.tool.use_agent(
+        # Use the more powerful 'use_agent' tool for final response generation
+        llm_tool_output = await _run_sync_tool(
+            agent.tool.use_agent,
             prompt=prompt,
             system_prompt=SYSTEM_PROMPT,
-            model_provider="bedrock",  # Switch to Bedrock instead of parent's model
-            model_settings={
-                "model_id": "us.anthropic.claude-sonnet-4-20250514-v1:0"
-            }))
-        llm_tool_output = await asyncio.wait_for(llm_tool_future, timeout=120.0)
+            model_provider="bedrock",
+            model_settings={"model_id": "us.anthropic.claude-sonnet-4-20250514-v1:0"}
+        )
 
-        processed_llm_text_output = _extract_main_text_from_llm_output(llm_tool_output)
+        # Extract text from complex LLM output
+        if isinstance(llm_tool_output, dict) and 'content' in llm_tool_output:
+            full_response_text = llm_tool_output['content'][0]['text']
+        else:
+            full_response_text = str(llm_tool_output)
 
-        logger.debug(f"Raw LLM tool output type: {type(llm_tool_output)}, content: {llm_tool_output}")
-        logger.debug(f"Processed text for streaming: {processed_llm_text_output}")
+        logger.info(f"Session [{session_id}]: Generated LLM response.")
+        
+        # Stream the response back to the client
+        escaped_response = full_response_text.replace("\n", "\\n")
+        yield f"data: {json.dumps({'type': 'chunk', 'content': escaped_response})}\n\n"
 
-        if processed_llm_text_output:
-            full_response_parts.append(processed_llm_text_output)
-            escaped_response_text = processed_llm_text_output.replace("\n", "\\n")
-            yield f"data: {json.dumps({'type': 'chunk', 'content': escaped_response_text})}\n\n"
+        # After streaming, save the interaction to AgentCore Memory
+        logger.info(f"Session [{session_id}]: Storing interaction in AgentCore Memory.")
+        await _run_sync_tool(
+            agent.tool.memory,
+            action="store",
+            session_id=session_id,
+            memory_id=AGENTCORE_MEMORY_ID,
+            human_input=original_query,
+            model_output=full_response_text
+        )
+        logger.info(f"Session [{session_id}]: Interaction stored successfully.")
 
-        yield f"data: {json.dumps({'type': 'end'})}\n\n"
-
-    except asyncio.TimeoutError:
-        logger.error(f"LLM response generation timed out.")
-        error_message = "Sorry, the request timed out while generating a response. Please try rephrasing your question."
-        escaped_error_message = error_message.replace("\n", "\\n")
-        yield f"data: {json.dumps({'type': 'error', 'content': escaped_error_message})}\n\n"
-        full_response_parts.append(f"[Error: {error_message}]")
     except Exception as e:
-        logger.error(f"Error during agent response streaming: {str(e)}", exc_info=True)
-        error_message = f"Sorry, an error occurred: {str(e)}"
-        escaped_error_message = error_message.replace("\n", "\\n")
-        yield f"data: {json.dumps({'type': 'error', 'content': escaped_error_message})}\n\n"
-        full_response_parts.append(f"[Error: {error_message}]")
+        logger.error(f"Session [{session_id}]: Error during agent streaming: {e}", exc_info=True)
+        error_message = f"An error occurred: {e}"
+        yield f"data: {json.dumps({'type': 'error', 'content': error_message})}\n\n"
+    finally:
+        yield f"data: {json.dumps({'type': 'end'})}\n\n"
 
 
 @app.post("/invocations", response_class=StreamingResponse)
 async def invocations(request: InvocationRequest):
-    agent = Agent(model=bedrock_model_instance, tools=[use_agent, bedrock_kb_memory_tool])
-    loop = asyncio.get_event_loop()
+    """Handles agent invocations, integrating RAG and conversational memory."""
+    agent = Agent(model=bedrock_model_instance, tools=[use_agent, strands_memory_tool])
     query = request.query
+    session_id = request.session_id
+
     try:
-        logger.info(f"Attempting KB retrieval for query: '{query}' using KB ID: {STRANDS_KNOWLEDGE_BASE_ID}")
-
-        retrieved_data_future = loop.run_in_executor(
-            executor,
-            lambda: agent.tool.memory(
-                action="retrieve",
-                query=query,
-                knowledge_base_id=STRANDS_KNOWLEDGE_BASE_ID,
-                max_results=3
-            )
+        # 1. Retrieve conversation history from AgentCore Memory
+        logger.info(f"Session [{session_id}]: Retrieving conversation history.")
+        history_raw = await _run_sync_tool(
+            agent.tool.memory,
+            action="retrieve",
+            session_id=session_id,
+            memory_id=AGENTCORE_MEMORY_ID,
+            max_results=5 # Retrieve the last 5 turns
         )
-        retrieved_data_raw = await asyncio.wait_for(retrieved_data_future, timeout=30.0)
+        history_str = "\n".join([f"Human: {h.get('human_input', '')}\nAI: {h.get('model_output', '')}" for h in history_raw])
+        logger.info(f"Session [{session_id}]: Retrieved {len(history_raw)} previous interactions.")
 
-        logger.debug(f"Retrieved data from KB (raw): {retrieved_data_raw}")
+        # 2. Retrieve context from Knowledge Base (RAG)
+        logger.info(f"Session [{session_id}]: Retrieving context from Knowledge Base for query: '{query}'")
+        kb_data_raw = await _run_sync_tool(
+            agent.tool.memory,
+            action="retrieve",
+            query=query,
+            knowledge_base_id=STRANDS_KNOWLEDGE_BASE_ID,
+            max_results=3
+        )
+        context_str = "\n\n---\n\n".join([item.get('text', '') for item in kb_data_raw if 'text' in item])
 
-        contexts = []
-        if isinstance(retrieved_data_raw, list):
-            for item in retrieved_data_raw:
-                if isinstance(item, dict) and 'text' in item and isinstance(item['text'], str):
-                    contexts.append(item['text'])
-                elif isinstance(item, str):
-                    contexts.append(item)
-        elif isinstance(retrieved_data_raw, dict) and 'text' in retrieved_data_raw and isinstance(retrieved_data_raw['text'], str):
-             contexts.append(retrieved_data_raw['text'])
-        elif isinstance(retrieved_data_raw, str):
-             contexts.append(retrieved_data_raw)
+        # 3. Construct the final prompt
+        final_prompt = (
+            f"**Conversation History:**\n{history_str}\n\n"
+            f"**Knowledge Base Context:**\n{context_str if context_str else 'No relevant context found.'}\n\n"
+            f"**User's Current Query:**\n\"{query}\"\n\n"
+            "Based on all the above information, provide your answer."
+        )
 
-        final_prompt_for_llm = ""
-        if not contexts:
-            logger.info(f"No relevant information found in KB for '{query}'.")
-            final_prompt_for_llm = (
-                f"The user asked: \"{query}\". No information was found in the knowledge base. "
-                "Follow your instructions for how to respond when no relevant information is available."
-            )
-        else:
-            context_str = "\n\n---\n\n".join(contexts)
-            final_prompt_for_llm = (
-                f"Use the following knowledge base context to answer the user's query.\n\n"
-                f"Context:\n{context_str}\n\n"
-                f"User Query: \"{query}\"\n\n"
-                "Remember to follow your rules strictly: if the context is not relevant, you must decline to answer."
-            )
-            logger.info(f"Generating response using RAG with {len(contexts)} context(s).")
+        return StreamingResponse(
+            stream_agent_response(agent, final_prompt, session_id, query),
+            media_type="text/event-stream"
+        )
 
-        return StreamingResponse(stream_agent_response(agent, final_prompt_for_llm, query), media_type="text/event-stream")
-
-    except asyncio.TimeoutError:
-        logger.error(f"Knowledge base retrieval for query '{query}' timed out.")
-        async def error_stream_timeout():
-            error_msg = "Sorry, the request timed out while searching for information. Please try again."
-            escaped_error_msg = error_msg.replace("\n", "\\n")
-            yield f"data: {json.dumps({'type': 'error', 'content': escaped_error_msg})}\n\n"
-        return StreamingResponse(error_stream_timeout(), media_type="text/event-stream")
     except Exception as e:
-        logger.error(f"Pre-stream error for query '{query}': {str(e)}", exc_info=True)
-        async def error_stream_main(exc: Exception):
-            error_msg = f"Error preparing your request: {str(exc)}"
-            escaped_error_msg = error_msg.replace("\n", "\\n")
-            yield f"data: {json.dumps({'type': 'error', 'content': escaped_error_msg})}\n\n"
-        return StreamingResponse(error_stream_main(e), media_type="text/event-stream")
+        logger.error(f"Session [{session_id}]: Error in main invocation handler: {e}", exc_info=True)
+        async def error_stream():
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+        return StreamingResponse(error_stream(), media_type="text/event-stream")
 
-@app.get("/ping", status_code=status.HTTP_200_OK)
-async def ping():
-    if not STRANDS_KNOWLEDGE_BASE_ID:
-        return {"status": "error", "detail": "STRANDS_KNOWLEDGE_BASE_ID is not set."}
+
+@app.get("/health", status_code=status.HTTP_200_OK)
+async def health_check():
+    """Health check endpoint for ELB."""
+    if not STRANDS_KNOWLEDGE_BASE_ID or not AGENTCORE_MEMORY_ID:
+        return {"status": "error", "detail": "Missing required environment variables."}
     return {"status": "ok", "message": "Strands Agent API is running."}
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8080))
-    host = os.environ.get("HOST", "0.0.0.0")
-    uvicorn.run("agent:app", host=host, port=port, timeout_keep_alive=300, reload=True)
