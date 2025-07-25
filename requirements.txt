@@ -1,7 +1,9 @@
 strands-agents
 strands-agents-tools
 anyio
-fastapi==0.115.12
-jinja2
-itsdangerous
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+requests
 markdown

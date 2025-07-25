@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
@@ -7,13 +7,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 
-COPY api.py .
-COPY templates ./templates
+COPY agent.py .
 
-
-EXPOSE 5001
+EXPOSE 8080
 
 ENV PYTHONUNBUFFERED=1
-ENV PORT=5001
+ENV PORT=8080
 ENV HOST="0.0.0.0" 
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "5001"]
+CMD ["uvicorn", "agent:app", "--host", "0.0.0.0", "--port", "8080"]
