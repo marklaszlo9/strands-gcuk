@@ -1,9 +1,10 @@
-strands-agents
-strands-agents-tools
+bedrock-agentcore
+boto3
 anyio
-fastapi
-uvicorn[standard]
-pydantic
-python-dotenv
-requests
+fastapi==0.115.12
+jinja2
+itsdangerous
 markdown
+python-dotenv
+uvicorn
+python-multipart
