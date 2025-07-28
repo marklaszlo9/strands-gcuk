@@ -17,11 +17,11 @@ COPY static-frontend ./static-frontend
 RUN mkdir -p /app/logs
 
 # Expose port
-EXPOSE 5001
+EXPOSE 8080
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
-ENV PORT=5001
+ENV PORT=8080
 ENV HOST="0.0.0.0"
 
 # AgentCore Memory ID should be provided at runtime
@@ -31,7 +31,7 @@ ENV HOST="0.0.0.0"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:5001/health || exit 1
+  CMD curl -f http://localhost:8080/health || exit 1
 
 # Run the application
 CMD ["python", "api.py"]

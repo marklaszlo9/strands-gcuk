@@ -466,6 +466,6 @@ if __name__ == "__main__":
         os.makedirs(css_dir, exist_ok=True)
         logger.info(f"Created directory: {css_dir}")
 
-    port = int(os.environ.get("PORT", 5001))
+    port = int(os.environ.get("PORT", 8080))  # AgentCore expects port 8080
     host = os.environ.get("HOST", "0.0.0.0")
     uvicorn.run("api:app", host=host, port=port, timeout_keep_alive=300, reload=True)

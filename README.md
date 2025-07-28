@@ -95,7 +95,7 @@ export AGENTCORE_MEMORY_ID="your-agentcore-memory-id"
 
 # Optional
 export SESSION_SECRET_KEY="your-secret-key"  # Auto-generated if not set
-export PORT="5001"
+export PORT="8080"  # AgentCore requires port 8080
 export HOST="0.0.0.0"
 export AWS_DEFAULT_REGION="us-east-1"
 ```

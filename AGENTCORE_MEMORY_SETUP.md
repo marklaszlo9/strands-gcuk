@@ -47,7 +47,7 @@ export STRANDS_KNOWLEDGE_BASE_ID="your-knowledge-base-id"
 
 # Optional
 export AWS_DEFAULT_REGION="us-east-1"
-export PORT="5001"
+export PORT="8080"  # AgentCore requires port 8080
 ```
 
 ## Step 3: Run the Application
@@ -70,7 +70,7 @@ python agent_cli.py --query "What is Envision?"
 docker build -t envision-agent .
 
 # Run with AgentCore memory
-docker run -p 5001:5001 \
+docker run -p 8080:8080 \
   -e AGENTCORE_MEMORY_ID="ABCDEFGH12345678" \
   -e STRANDS_KNOWLEDGE_BASE_ID="your-kb-id" \
   -e AWS_ACCESS_KEY_ID="your-access-key" \
@@ -84,15 +84,15 @@ docker run -p 5001:5001 \
 ### Test Memory Persistence:
 ```bash
 # First conversation
-curl -X POST http://localhost:5001/connect -H "Content-Type: application/json" -d '{}'
+curl -X POST http://localhost:8080/connect -H "Content-Type: application/json" -d '{}'
 # Response: {"session_id": "session-123", "message": "..."}
 
-curl -X POST http://localhost:5001/query \
+curl -X POST http://localhost:8080/query \
   -H "Content-Type: application/json" \
   -d '{"session_id": "session-123", "query": "My name is John"}'
 
 # Second conversation (should remember previous context)
-curl -X POST http://localhost:5001/query \
+curl -X POST http://localhost:8080/query \
   -H "Content-Type: application/json" \
   -d '{"session_id": "session-123", "query": "What is my name?"}'
 # Should respond with "John" based on memory
@@ -111,7 +111,7 @@ aws bedrock-agentcore get-memory \
 ### Clear Memory (Optional):
 ```bash
 # Through the application API
-curl -X DELETE http://localhost:5001/session/session-123
+curl -X DELETE http://localhost:8080/session/session-123
 ```
 
 ### Delete Memory (When Done):
