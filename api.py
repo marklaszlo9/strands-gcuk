@@ -394,26 +394,33 @@ async def root_health_check():
     """
     return {"status": "healthy", "service": "envision-agent"}
 
-@app.post("/invoke", status_code=status.HTTP_200_OK)
-async def agentcore_invoke(request: Request):
+@app.get("/ping", status_code=status.HTTP_200_OK)
+async def ping():
     """
-    AgentCore invoke endpoint - main entry point for AgentCore service
+    AgentCore ping endpoint - simple connectivity check
+    """
+    return {"status": "ok"}
+
+@app.post("/invocations", status_code=status.HTTP_200_OK)
+async def agentcore_invocations(request: Request):
+    """
+    AgentCore invocations endpoint - main entry point for AgentCore service
     This endpoint receives requests from the AgentCore service
+    Expected format: {"prompt": "user query"}
     """
     try:
         # Get the request body
         body = await request.json()
-        logger.info(f"AgentCore invoke request: {body}")
+        logger.info(f"AgentCore invocations request: {body}")
         
         # Extract the user query from the AgentCore request format
-        user_query = body.get("input", {}).get("text", "")
-        session_id = body.get("sessionId", "agentcore-session")
+        user_query = body.get("prompt", "")
+        session_id = body.get("sessionId", f"agentcore-session-{secrets.token_hex(8)}")
         
         if not user_query:
             return {
-                "output": {
-                    "text": "I didn't receive a valid query. Please ask me a question about the Envision Sustainable Infrastructure Framework."
-                }
+                "response": "I didn't receive a valid query. Please ask me a question about the Envision Sustainable Infrastructure Framework.",
+                "sessionId": session_id
             }
         
         # Create or get agent for this session
@@ -433,18 +440,15 @@ async def agentcore_invoke(request: Request):
         
         # Return response in AgentCore format
         return {
-            "output": {
-                "text": response
-            },
+            "response": response,
             "sessionId": session_id
         }
         
     except Exception as e:
-        logger.error(f"Error in AgentCore invoke: {str(e)}", exc_info=True)
+        logger.error(f"Error in AgentCore invocations: {str(e)}", exc_info=True)
         return {
-            "output": {
-                "text": f"I apologize, but I encountered an error while processing your request: {str(e)}"
-            }
+            "response": f"I apologize, but I encountered an error while processing your request: {str(e)}",
+            "error": str(e)
         }
 
 if __name__ == "__main__":

@@ -171,6 +171,13 @@ aws bedrock-agentcore list-memories --region us-east-1
 
 # Test memory access
 aws bedrock-agentcore get-memory --memory-id "your-memory-id" --region us-east-1
+
+# Test AgentCore endpoints
+curl http://localhost:8080/ping
+curl http://localhost:8080/health
+curl -X POST http://localhost:8080/invocations \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "What is the Envision framework?"}'
 ```
 
 ## Best Practices
