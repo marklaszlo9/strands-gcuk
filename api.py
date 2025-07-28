@@ -162,7 +162,7 @@ async def _create_new_agent_session(user_id: str) -> str:
     logger.info(f"Session {session_id} created for user {user_id}. KB ID: {STRANDS_KNOWLEDGE_BASE_ID}. Model: {model_id}, Region: {region}")
     return session_id
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/chat", response_class=HTMLResponse)
 async def main_chat_page(request: Request):
     user = await get_current_user(request)
     user_id = user["id"]
@@ -376,11 +376,76 @@ async def cleanup_session_endpoint(session_id: str, request: Request):
         return JSONResponse({"message": "Session cleaned up successfully."})
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found.")
 
+# AgentCore Runtime Service Contract Endpoints
+# Based on: https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-service-contract.html
+
 @app.get("/health", status_code=status.HTTP_200_OK)
 async def health_check():
-    if not STRANDS_KNOWLEDGE_BASE_ID:
-        return {"status": "error", "detail": "STRANDS_KNOWLEDGE_BASE_ID is not set."}
-    return {"status": "ok", "message": "Strands Agent API is running."}
+    """
+    AgentCore health check endpoint - must always return 200 OK
+    This is required by the AgentCore runtime service contract
+    """
+    return {"status": "healthy"}
+
+@app.get("/", status_code=status.HTTP_200_OK)
+async def root_health_check():
+    """
+    Root endpoint health check for AgentCore
+    """
+    return {"status": "healthy", "service": "envision-agent"}
+
+@app.post("/invoke", status_code=status.HTTP_200_OK)
+async def agentcore_invoke(request: Request):
+    """
+    AgentCore invoke endpoint - main entry point for AgentCore service
+    This endpoint receives requests from the AgentCore service
+    """
+    try:
+        # Get the request body
+        body = await request.json()
+        logger.info(f"AgentCore invoke request: {body}")
+        
+        # Extract the user query from the AgentCore request format
+        user_query = body.get("input", {}).get("text", "")
+        session_id = body.get("sessionId", "agentcore-session")
+        
+        if not user_query:
+            return {
+                "output": {
+                    "text": "I didn't receive a valid query. Please ask me a question about the Envision Sustainable Infrastructure Framework."
+                }
+            }
+        
+        # Create or get agent for this session
+        if session_id not in agent_sessions:
+            user_id = f"agentcore_user_{session_id}"
+            session_id_internal = await _create_new_agent_session(user_id)
+            # Map AgentCore session to internal session
+            agent_sessions[session_id] = agent_sessions[session_id_internal]
+        
+        agent = agent_sessions[session_id]["agent"]
+        
+        # Process the query using RAG
+        if STRANDS_KNOWLEDGE_BASE_ID:
+            response = await agent.query_with_rag(user_query)
+        else:
+            response = await agent.query(user_query)
+        
+        # Return response in AgentCore format
+        return {
+            "output": {
+                "text": response
+            },
+            "sessionId": session_id
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in AgentCore invoke: {str(e)}", exc_info=True)
+        return {
+            "output": {
+                "text": f"I apologize, but I encountered an error while processing your request: {str(e)}"
+            }
+        }
 
 if __name__ == "__main__":
     import uvicorn
