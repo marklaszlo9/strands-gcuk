@@ -25,7 +25,9 @@ ENV PORT=5001
 ENV HOST="0.0.0.0"
 
 # AgentCore Memory ID should be provided at runtime
+
 # ENV AGENTCORE_MEMORY_ID="memory_io2n5-94iksj6Jr7"
+
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
