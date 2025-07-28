@@ -1,21 +1,33 @@
-name: CI
+# .github/workflows/main.yml
+
+name: Run Python Tests
 
 on:
   push:
+    branches: [ main ]
   pull_request:
+    branches: [ main ]
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest httpx
-      - name: Run tests
-        run: pytest -q
+    - uses: actions/checkout@v3
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11' # Make sure this matches your project's version
+
+    - name: Install dependencies
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio # Ensure testing tools are installed
+
+    - name: Run Pytest
+      # This 'env' block makes the secret available to the pytest command
+      env:
+        STRANDS_KNOWLEDGE_BASE_ID: ${{ secrets.STRANDS_KNOWLEDGE_BASE_ID }}
+      run: |
+        pytest
