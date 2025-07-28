@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentCore Envision Chat</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .chat-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .chat-header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .chat-messages {
+            height: 400px;
+            overflow-y: auto;
+            padding: 20px;
+            border-bottom: 1px solid #eee;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 8px;
+        }
+        .message.user {
+            background: #e3f2fd;
+            margin-left: 20%;
+        }
+        .message.agent {
+            background: #f1f8e9;
+            margin-right: 20%;
+        }
+        .chat-input {
+            display: flex;
+            padding: 20px;
+        }
+        .chat-input input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        .chat-input button {
+            margin-left: 10px;
+            padding: 12px 20px;
+            background: #2c3e50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .chat-input button:hover {
+            background: #34495e;
+        }
+        .chat-input button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+        }
+        .loading {
+            color: #7f8c8d;
+            font-style: italic;
+        }
+        .error {
+            color: #e74c3c;
+            background: #fdf2f2;
+            border: 1px solid #fecaca;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1>Envision Framework Assistant</h1>
+            <p>Ask questions about the Envision Sustainable Infrastructure Framework</p>
+        </div>
+        <div class="chat-messages" id="messages">
+            <div class="message agent">
+                <strong>Agent:</strong> Hi there, I am your AI agent here to help with questions about the Envision Sustainable Infrastructure Framework.
+            </div>
+        </div>
+        <div class="chat-input">
+            <input type="text" id="messageInput" placeholder="Ask a question about Envision..." />
+            <button onclick="sendMessage()" id="sendButton">Send</button>
+        </div>
+    </div>
+
+    <script>
+        // Configuration - Update these URLs for your deployment
+        const API_BASE_URL = 'http://localhost:5001'; // Change to your API URL
+        let sessionId = null;
+
+        // Initialize session on page load
+        async function initializeSession() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/connect`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({})
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    sessionId = data.session_id;
+                    console.log('Session initialized:', sessionId);
+                } else {
+                    throw new Error('Failed to initialize session');
+                }
+            } catch (error) {
+                console.error('Error initializing session:', error);
+                addMessage('agent', 'Sorry, I could not connect to the service. Please refresh the page.', true);
+            }
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const sendButton = document.getElementById('sendButton');
+            const message = input.value.trim();
+            
+            if (!message || !sessionId) return;
+
+            // Add user message to chat
+            addMessage('user', message);
+            input.value = '';
+            sendButton.disabled = true;
+
+            // Add loading message
+            const loadingId = addMessage('agent', 'Thinking...', false, true);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/query`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        query: message
+                    })
+                });
+
+                // Remove loading message
+                removeMessage(loadingId);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    addMessage('agent', data.formatted_response || data.response);
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+            } catch (error) {
+                console.error('Error sending message:', error);
+                removeMessage(loadingId);
+                addMessage('agent', 'Sorry, there was an error processing your request. Please try again.', true);
+            } finally {
+                sendButton.disabled = false;
+            }
+        }
+
+        function addMessage(sender, content, isError = false, isLoading = false) {
+            const messagesContainer = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            const messageId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            
+            messageDiv.id = messageId;
+            messageDiv.className = `message ${sender}`;
+            if (isError) messageDiv.className += ' error';
+            if (isLoading) messageDiv.className += ' loading';
+            
+            messageDiv.innerHTML = `<strong>${sender === 'user' ? 'You' : 'Agent'}:</strong> ${content}`;
+            
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            return messageId;
+        }
+
+        function removeMessage(messageId) {
+            const messageElement = document.getElementById(messageId);
+            if (messageElement) {
+                messageElement.remove();
+            }
+        }
+
+        // Handle Enter key in input
+        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Initialize session when page loads
+        window.addEventListener('load', initializeSession);
+    </script>
+</body>
+</html>

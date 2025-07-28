@@ -2,31 +2,24 @@ import asyncio
 import logging
 import os
 import secrets
-import base64
 import json
 import markdown
 import concurrent.futures
-from typing import Dict, List, Optional, Any, AsyncGenerator, Tuple
-from urllib.parse import urlencode
+from typing import Dict, List, Optional, Any, AsyncGenerator
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
-import requests
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, Form, Depends, status
-from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, Form, status
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
-from strands import Agent
-# Using the memory tool again
-from strands_tools.memory import memory as bedrock_kb_memory_tool
-from strands_tools import use_agent
-from strands.models import BedrockModel
+from custom_agent import CustomEnvisionAgent
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -86,12 +79,7 @@ Follow these instructions precisely:
 4.  If the query is conversational (e.g., "hello", "thank you"), you may respond politely but briefly.
 """
 
-bedrock_model_instance = BedrockModel(
-        model_id=DEFAULT_MODEL_ID,
-        region=DEFAULT_REGION,
-        system_prompt=SYSTEM_PROMPT
-    )
-logger.debug(f"BedrockModel attributes: {dir(bedrock_model_instance)}")
+# Configuration is now handled in CustomEnvisionAgent
 
 
 # --- Pydantic Models ---
@@ -144,26 +132,29 @@ async def _create_new_agent_session(user_id: str) -> str:
     region = DEFAULT_REGION
     model_id = DEFAULT_MODEL_ID
 
-    bedrock_model_instance = BedrockModel(
+    # Create CustomEnvisionAgent with AgentCore memory and user_id
+    agent = CustomEnvisionAgent(
         model_id=model_id,
         region=region,
-        system_prompt=SYSTEM_PROMPT
+        knowledge_base_id=STRANDS_KNOWLEDGE_BASE_ID,
+        system_prompt=SYSTEM_PROMPT,
+        user_id=user_id,  # Pass user_id for memory management
+        memory_id=os.environ.get('AGENTCORE_MEMORY_ID')  # AgentCore memory ID from environment
     )
+    
+    logger.info(f"Session {session_id}: CustomEnvisionAgent initialized with model {model_id}, using AgentCore memory for region {region}.")
 
-    # Pass the BedrockModel instance and the memory tool to the Agent
-    agent = Agent(model=bedrock_model_instance, tools=[use_agent, bedrock_kb_memory_tool])
-    logger.info(f"Session {session_id}: Strands Agent initialized with model {model_id}, using memory tool for region {region}.")
-
-    initial_greeting_html = format_response_html(INITIAL_GREETING)
+    initial_greeting = agent.get_initial_greeting()
+    initial_greeting_html = format_response_html(initial_greeting)
 
     agent_sessions[session_id] = {
         "agent": agent,
         "region": region,
-        "model_id": bedrock_model_instance,
+        "model_id": model_id,
         "chat_history": [{
             "sender": "agent",
             "query": None,
-            "response": INITIAL_GREETING,
+            "response": initial_greeting,
             "formatted_response": initial_greeting_html
         }],
         "user_id": user_id
@@ -211,57 +202,15 @@ async def main_chat_page(request: Request):
     })
 
 
-def _extract_main_text_from_llm_output(llm_output: Any) -> str:
-    """
-    Helper function to robustly extract the primary text content
-    from the llm_tool_output.
-    """
-    processed_text = ""
-    if isinstance(llm_output, dict):
-        content_list = llm_output.get('content')
-        if isinstance(content_list, list) and len(content_list) > 0:
-            first_content_item = content_list[0]
-            if isinstance(first_content_item, dict):
-                text_val = first_content_item.get('text')
-                if isinstance(text_val, str):
-                    processed_text = text_val.strip()
-            if not processed_text:
-                text_val_top = llm_output.get('text')
-                if isinstance(text_val_top, str):
-                    processed_text = text_val_top
-                else:
-                    content_val_top = llm_output.get('content')
-                    if isinstance(content_val_top, str):
-                        processed_text = content_val_top
-    elif isinstance(llm_output, str):
-        processed_text = llm_output
-
-    if not isinstance(processed_text, str) or not processed_text:
-        if llm_output is not None:
-            processed_text = str(llm_output)
-            logger.info(f"LLM output was complex or non-string, using its full string representation: {processed_text[:200]}...")
-        else:
-            processed_text = ""
-    return processed_text
-
-
-async def stream_agent_response(agent: Agent, prompt: str, session_id: str, query_text: str) -> AsyncGenerator[str, None]:
+async def stream_agent_response(agent: CustomEnvisionAgent, prompt: str, session_id: str, query_text: str) -> AsyncGenerator[str, None]:
     full_response_parts = []
     processed_llm_text_output = ""
     try:
-        loop = asyncio.get_event_loop()
-        llm_tool_future = loop.run_in_executor(executor, lambda: agent.tool.use_agent(
-            prompt=prompt, 
-            system_prompt=SYSTEM_PROMPT, 
-            model_provider="bedrock",  # Switch to Bedrock instead of parent's model
-            model_settings={
-                "model_id": "us.anthropic.claude-sonnet-4-20250514-v1:0"
-            }))
-        llm_tool_output = await asyncio.wait_for(llm_tool_future, timeout=120.0)
+        # Use the CustomEnvisionAgent's query method directly
+        response = await agent.query(prompt)
+        processed_llm_text_output = agent.extract_text_from_response(response)
 
-        processed_llm_text_output = _extract_main_text_from_llm_output(llm_tool_output)
-
-        logger.debug(f"Session {session_id}: Raw LLM tool output type: {type(llm_tool_output)}, content: {llm_tool_output}")
+        logger.debug(f"Session {session_id}: Raw agent response type: {type(response)}, content: {response}")
         logger.debug(f"Session {session_id}: Processed text for streaming: {processed_llm_text_output}")
 
         if processed_llm_text_output:
@@ -272,7 +221,7 @@ async def stream_agent_response(agent: Agent, prompt: str, session_id: str, quer
         yield f"data: {json.dumps({'type': 'end'})}\n\n"
 
     except asyncio.TimeoutError:
-        logger.error(f"Session {session_id}: LLM response generation timed out.")
+        logger.error(f"Session {session_id}: Agent response generation timed out.")
         error_message = "Sorry, the request timed out while generating a response. Please try rephrasing your question."
         escaped_error_message = error_message.replace("\n", "\\n")
         yield f"data: {json.dumps({'type': 'error', 'content': escaped_error_message})}\n\n"
@@ -308,63 +257,51 @@ async def web_query_stream(request: Request, session_id: str = Form(...), query:
         logger.warning(f"Streaming query: Session {session_id} not found or agent invalid.")
         return StreamingResponse(error_stream(), media_type="text/event-stream")
 
-    agent: Agent = session_data["agent"]
-    loop = asyncio.get_event_loop()
+    agent: CustomEnvisionAgent = session_data["agent"]
 
     try:
-        logger.info(f"Session {session_id}: Attempting KB retrieval for query: '{query}' using KB ID: {STRANDS_KNOWLEDGE_BASE_ID}")
+        logger.info(f"Session {session_id}: Processing query with RAG: '{query}' using KB ID: {STRANDS_KNOWLEDGE_BASE_ID}")
         
-        retrieved_data_future = loop.run_in_executor(
-            executor,
-            lambda: agent.tool.memory(
-                action="retrieve",
-                query=query,
-                knowledge_base_id=STRANDS_KNOWLEDGE_BASE_ID,
-                max_results=3
-            )
-        )
-        retrieved_data_raw = await asyncio.wait_for(retrieved_data_future, timeout=30.0)
-        
-        logger.debug(f"Session {session_id}: Retrieved data from KB (raw): {retrieved_data_raw}")
+        # Use the CustomEnvisionAgent's query_with_rag method which handles RAG internally
+        # We'll create a simple streaming wrapper around it
+        async def rag_stream():
+            try:
+                response = await agent.query_with_rag(query, max_results=3)
+                response_text = agent.extract_text_from_response(response)
+                
+                if response_text:
+                    escaped_response_text = response_text.replace("\n", "\\n")
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': escaped_response_text})}\n\n"
+                
+                yield f"data: {json.dumps({'type': 'end'})}\n\n"
+                
+                # Save to chat history
+                if session_id in agent_sessions:
+                    formatted_html_response = format_response_html(response_text)
+                    agent_sessions[session_id]["chat_history"].append({
+                        "sender": "user",
+                        "query": query,
+                        "response": response_text,
+                        "formatted_response": formatted_html_response
+                    })
+                    logger.info(f"Session {session_id}: Saved user query and agent response to history.")
+                    
+            except Exception as e:
+                logger.error(f"Session {session_id}: Error during RAG streaming: {str(e)}", exc_info=True)
+                error_message = f"Sorry, an error occurred: {str(e)}"
+                escaped_error_message = error_message.replace("\n", "\\n")
+                yield f"data: {json.dumps({'type': 'error', 'content': escaped_error_message})}\n\n"
+                
+                if session_id in agent_sessions:
+                    agent_sessions[session_id]["chat_history"].append({
+                        "sender": "user",
+                        "query": query,
+                        "response": f"[Error: {error_message}]",
+                        "formatted_response": format_response_html(f"[Error: {error_message}]")
+                    })
 
-        contexts = []
-        if isinstance(retrieved_data_raw, list):
-            for item in retrieved_data_raw:
-                if isinstance(item, dict) and 'text' in item and isinstance(item['text'], str):
-                    contexts.append(item['text'])
-                elif isinstance(item, str):
-                    contexts.append(item)
-        elif isinstance(retrieved_data_raw, dict) and 'text' in retrieved_data_raw and isinstance(retrieved_data_raw['text'], str):
-             contexts.append(retrieved_data_raw['text'])
-        elif isinstance(retrieved_data_raw, str):
-             contexts.append(retrieved_data_raw)
-
-        final_prompt_for_llm = ""
-        if not contexts:
-            logger.info(f"Session {session_id}: No relevant information found in KB for '{query}'.")
-            final_prompt_for_llm = (
-                f"The user asked: \"{query}\". No information was found in the knowledge base. "
-                "Follow your instructions for how to respond when no relevant information is available."
-            )
-        else:
-            context_str = "\n\n---\n\n".join(contexts)
-            final_prompt_for_llm = (
-                f"Use the following knowledge base context to answer the user's query.\n\n"
-                f"Context:\n{context_str}\n\n"
-                f"User Query: \"{query}\"\n\n"
-                "Remember to follow your rules strictly: if the context is not relevant, you must decline to answer."
-            )
-            logger.info(f"Session {session_id}: Generating response using RAG with {len(contexts)} context(s).")
-
-        return StreamingResponse(stream_agent_response(agent, final_prompt_for_llm, session_id, query), media_type="text/event-stream")
+        return StreamingResponse(rag_stream(), media_type="text/event-stream")
     
-    except asyncio.TimeoutError:
-        logger.error(f"Session {session_id}: Knowledge base retrieval for query '{query}' timed out.")
-        async def error_stream_timeout():
-            error_msg = "Sorry, the request timed out while searching for information. Please try again."
-            escaped_error_msg = error_msg.replace("\n", "\\n")
-            yield f"data: {json.dumps({'type': 'error', 'content': escaped_error_msg})}\n\n"
-        return StreamingResponse(error_stream_timeout(), media_type="text/event-stream")
     except Exception as e:
         logger.error(f"Session {session_id}: Pre-stream error for query '{query}': {str(e)}", exc_info=True)
         async def error_stream_main(exc: Exception):
@@ -402,49 +339,18 @@ async def api_query_non_streaming(query_request: QueryRequest, request: Request)
     if not session_data or not session_data.get("agent"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found or expired.")
 
-    agent: Agent = session_data["agent"]
-    llm_tool_output_sync = ""
-    loop = asyncio.get_event_loop()
+    agent: CustomEnvisionAgent = session_data["agent"]
     query = query_request.query
+    
     try:
-        logger.info(f"API NPO-STREAM Session {query_request.session_id}: Attempting KB retrieval for query: '{query}'")
+        logger.info(f"API Session {query_request.session_id}: Processing query with RAG: '{query}'")
         
-        retrieved_data_future = loop.run_in_executor(
-            executor,
-            lambda: agent.tool.memory(action="retrieve", query=query, knowledge_base_id=STRANDS_KNOWLEDGE_BASE_ID, max_results=3)
-        )
-        retrieved_data_raw = await asyncio.wait_for(retrieved_data_future, timeout=30.0)
-
-        contexts = []
-        if isinstance(retrieved_data_raw, list):
-            for item in retrieved_data_raw:
-                if isinstance(item, dict) and 'text' in item and isinstance(item['text'], str): contexts.append(item['text'])
-                elif isinstance(item, str): contexts.append(item)
-        elif isinstance(retrieved_data_raw, dict) and 'text' in retrieved_data_raw and isinstance(retrieved_data_raw['text'], str): contexts.append(retrieved_data_raw['text'])
-        elif isinstance(retrieved_data_raw, str): contexts.append(retrieved_data_raw)
-
-        final_prompt_for_llm = ""
-        if not contexts:
-            final_prompt_for_llm = (
-                f"The user asked: \"{query}\". No information was found in the knowledge base. "
-                "Follow your instructions for how to respond when no relevant information is available."
-            )
-        else:
-            context_str = "\n\n---\n\n".join(contexts)
-            final_prompt_for_llm = (
-                f"Use the following knowledge base context to answer the user's query.\n\n"
-                f"Context:\n{context_str}\n\n"
-                f"User Query: \"{query}\"\n\n"
-                "Remember to follow your rules strictly: if the context is not relevant, you must decline to answer."
-            )
-
-        llm_tool_future_sync = loop.run_in_executor(executor, lambda: agent(final_prompt_for_llm))
-        llm_tool_output_sync = await asyncio.wait_for(llm_tool_future_sync, timeout=120.0)
-
-        response_text = _extract_main_text_from_llm_output(llm_tool_output_sync)
+        # Use the CustomEnvisionAgent's query_with_rag method
+        response = await agent.query_with_rag(query, max_results=3)
+        response_text = agent.extract_text_from_response(response)
 
     except asyncio.TimeoutError:
-        logger.error(f"API Session {query_request.session_id}: A part of the query processing timed out for query '{query}'.")
+        logger.error(f"API Session {query_request.session_id}: Query processing timed out for query '{query}'.")
         raise HTTPException(status_code=status.HTTP_408_REQUEST_TIMEOUT, detail="The request timed out while processing. Please try again.")
     except Exception as e:
         logger.error(f"API Session {query_request.session_id}: Error processing query '{query}': {str(e)}", exc_info=True)

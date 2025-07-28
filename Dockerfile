@@ -1,19 +1,35 @@
-FROM python:3.13-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
+# Copy requirements and install dependencies
 COPY requirements.txt .
-
 RUN pip install --no-cache-dir -r requirements.txt
 
-
+# Copy application files
+COPY custom_agent.py .
 COPY api.py .
+COPY agent_cli.py .
 COPY templates ./templates
+COPY static-frontend ./static-frontend
 
+# Create necessary directories
+RUN mkdir -p /app/logs
 
+# Expose port
 EXPOSE 5001
 
+# Environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PORT=5001
-ENV HOST="0.0.0.0" 
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "5001"]
+ENV HOST="0.0.0.0"
+
+# AgentCore Memory ID should be provided at runtime
+# ENV AGENTCORE_MEMORY_ID="your-memory-id-here"
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:5001/health || exit 1
+
+# Run the application
+CMD ["python", "api.py"]

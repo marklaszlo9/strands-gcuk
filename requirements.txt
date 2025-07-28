@@ -1,7 +1,10 @@
-strands-agents
-strands-agents-tools
+bedrock-agentcore
+boto3
 anyio
 fastapi==0.115.12
 jinja2
 itsdangerous
 markdown
+python-dotenv
+uvicorn
+python-multipart

@@ -1,18 +1,22 @@
 [project]
-name = "strands-agent-cli"
+name = "agentcore-agent-cli"
 version = "0.1.0"
-description = "Simple CLI for Strands Agent with MCP tools"
+description = "Simple CLI for AgentCore Agent with custom tools"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "strands-agents>=0.1.0",
-    "strands-agents-tools>=0.1.0",
+    "agentcore",
     "anyio",
-    "mcp[cli]>=1.8.0",
+    "fastapi==0.115.12",
+    "jinja2",
+    "itsdangerous",
+    "markdown",
+    "python-dotenv",
+    "uvicorn",
 ]
 
 [project.scripts]
-strands-agent = "agent_cli:cli"
+agentcore-agent = "agent_cli:cli"
 
 [tool.setuptools]
 py-modules = ["agent_cli"]
