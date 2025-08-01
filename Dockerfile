@@ -12,8 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY custom_agent.py .
 COPY agent_cli.py .
 COPY runtime_agent_main.py .
-COPY templates ./templates
-COPY static-frontend ./static-frontend
+
 
 # Create necessary directories
 RUN mkdir -p /app/logs
