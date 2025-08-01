@@ -1,4 +1,4 @@
-FROM public.ecr.aws/primaassicurazioni/python-slim:3.11-2
+FROM public.ecr.aws/docker/library/python:3.13-slim
 WORKDIR /app
 
 # Install curl for health checks
