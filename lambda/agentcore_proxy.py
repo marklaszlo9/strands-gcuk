@@ -15,14 +15,36 @@ try:
     OBSERVABILITY_AVAILABLE = True
     # Initialize tracer
     tracer = trace.get_tracer(__name__)
-except ImportError:
+except ImportError as e:
     OBSERVABILITY_AVAILABLE = False
-    # Create a no-op tracer
+    # Create a no-op tracer and status classes
+    class NoOpStatus:
+        def __init__(self, status_code, description=""):
+            pass
+    
+    class NoOpStatusCode:
+        OK = "OK"
+        ERROR = "ERROR"
+    
+    class NoOpSpan:
+        def set_attribute(self, key, value):
+            pass
+        def add_event(self, name, attributes=None):
+            pass
+        def set_status(self, status):
+            pass
+    
     class NoOpTracer:
         def start_as_current_span(self, name, **kwargs):
-            from contextlib import nullcontext
-            return nullcontext()
+            from contextlib import contextmanager
+            @contextmanager
+            def noop_span():
+                yield NoOpSpan()
+            return noop_span()
+    
     tracer = NoOpTracer()
+    Status = NoOpStatus
+    StatusCode = NoOpStatusCode()
 
 # Configure logging
 logger = logging.getLogger()
@@ -66,7 +88,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     },
                     'body': ''
                 }
-        
+            
             # Parse the request body
             if 'body' not in event:
                 return create_error_response(400, "Missing request body")
