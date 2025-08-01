@@ -13,6 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY custom_agent.py .
 COPY agent_cli.py .
 COPY runtime_agent_main.py .
+COPY agentcore_runtime_service.py .
+
 
 # Create necessary directories
 RUN mkdir -p /app/logs
@@ -34,6 +36,7 @@ ENV HOST="0.0.0.0"
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
-# Run the application
-# For observability, use: CMD ["opentelemetry-instrument", "python", "api.py"]
-CMD ["opentelemetry-instrument", "python", "runtime_agent_main.py"]
+# Run the AgentCore runtime service (implements service contract)
+# This service runs on port 8080 and implements /health, /ping, /invocations endpoints
+CMD ["opentelemetry-instrument", "python", "agentcore_runtime_service.py"]
+
