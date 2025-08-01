@@ -29,6 +29,15 @@ except ImportError as e:
 
 from custom_agent import CustomEnvisionAgent
 
+# Initialize AgentCore Runtime for observability
+agentcore_runtime = None
+if AGENTCORE_RUNTIME_AVAILABLE:
+    try:
+        agentcore_runtime = Runtime()
+        logger.info("✅ AgentCore Runtime initialized with observability")
+    except Exception as e:
+        logger.warning(f"Could not initialize AgentCore Runtime: {str(e)}")
+
 
 class AgentCoreRuntime:
     """
@@ -38,15 +47,6 @@ class AgentCoreRuntime:
     def __init__(self):
         """Initialize the AgentCore runtime"""
         self.agent = None
-        self.agentcore_runtime = None
-        
-        # Initialize AgentCore Runtime as per AWS documentation
-        if AGENTCORE_RUNTIME_AVAILABLE:
-            try:
-                self.agentcore_runtime = Runtime()
-                logger.info("✅ AgentCore Runtime initialized")
-            except Exception as e:
-                logger.warning(f"Could not initialize AgentCore Runtime: {str(e)}")
         
         # Get configuration from environment
         self.model_id = os.environ.get('MODEL_ID', 'us.amazon.nova-micro-v1:0')
@@ -96,6 +96,7 @@ class AgentCoreRuntime:
             health_status = {
                 "status": "healthy",
                 "agentcore_runtime_available": AGENTCORE_RUNTIME_AVAILABLE,
+                "agentcore_runtime_initialized": agentcore_runtime is not None,
                 "agent_initialized": self.agent is not None,
                 "configuration": {
                     "model_id": self.model_id,

@@ -13,7 +13,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY custom_agent.py .
 COPY agent_cli.py .
 COPY runtime_agent_main.py .
-COPY agentcore_runtime_service.py .
 
 
 # Create necessary directories
@@ -32,11 +31,12 @@ ENV HOST="0.0.0.0"
 # AgentCore Memory ID should be provided at runtime
 # ENV AGENTCORE_MEMORY_ID="your-memory-id"
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+# Health check - AgentCore will handle health checks when deployed
+# For local testing, this can be disabled
+# HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+#     CMD curl -f http://localhost:8080/health || exit 1
 
-# Run the AgentCore runtime service (implements service contract)
-# This service runs on port 8080 and implements /health, /ping, /invocations endpoints
-CMD ["opentelemetry-instrument", "python", "agentcore_runtime_service.py"]
+# Run the AgentCore runtime with observability (as per AWS docs)
+# This follows the bedrock_agentcore_starter_toolkit pattern
+CMD ["opentelemetry-instrument", "python", "runtime_agent_main.py"]
 
