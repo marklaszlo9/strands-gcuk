@@ -1,11 +1,9 @@
+# Core dependencies for local development and CLI
 bedrock-agentcore
 boto3
-anyio
+
+# Optional: For local FastAPI development (not needed for Lambda deployment)
 fastapi==0.115.12
-jinja2
-itsdangerous
-markdown
-python-dotenv
 uvicorn
-python-multipart
+python-dotenv
 
