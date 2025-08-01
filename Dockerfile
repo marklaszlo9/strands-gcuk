@@ -31,10 +31,9 @@ ENV HOST="0.0.0.0"
 # AgentCore Memory ID should be provided at runtime
 # ENV AGENTCORE_MEMORY_ID="your-memory-id"
 
-# Health check - AgentCore will handle health checks when deployed
-# For local testing, this can be disabled
-# HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-#     CMD curl -f http://localhost:8080/health || exit 1
+# Health check - Now implements AgentCore service contract
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
 
 # Run the AgentCore runtime with observability (as per AWS docs)
 # This follows the bedrock_agentcore_starter_toolkit pattern
