@@ -166,14 +166,14 @@ def process_agentcore_response(response: Dict[str, Any]) -> str:
     Process the AgentCore response and extract the text content from StreamingBody with observability
     """
     with tracer.start_as_current_span("process_agentcore_response") as span:
-            try:
-                logger.info(f"Processing response with keys: {list(response.keys())}")
-                content_type = response.get("contentType", "")
-                logger.info(f"Content type: {content_type}")
-                
-                span.set_attribute("content_type", content_type)
-                span.set_attribute("response_keys", list(response.keys()))
+        try:
+            logger.info(f"Processing response with keys: {list(response.keys())}")
+            content_type = response.get("contentType", "")
+            logger.info(f"Content type: {content_type}")
             
+            span.set_attribute("content_type", content_type)
+            span.set_attribute("response_keys", list(response.keys()))
+        
             # Handle text/event-stream responses (most common for AgentCore)
             if "text/event-stream" in content_type:
                 logger.info("Processing event-stream response")
