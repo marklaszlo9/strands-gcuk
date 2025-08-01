@@ -101,31 +101,20 @@
 
     <script>
         // Configuration - Update these URLs for your deployment
-        const API_BASE_URL = 'http://localhost:5001'; // Change to your API URL
-        let sessionId = null;
+        const LAMBDA_API_URL = 'https://avbg5oc8be.execute-api.us-east-1.amazonaws.com/prod/agentcore'; // Lambda proxy URL
+        const USE_LAMBDA = true; // Set to false to use direct AgentCore calls (requires AWS credentials)
+        
+        // Alternative: Direct AgentCore configuration (requires AWS SDK and credentials)
+        const AGENTCORE_CONFIG = {
+            region: 'us-east-1',
+            agentArn: 'arn:aws:bedrock-agentcore:us-east-1:886436945166:runtime/hosted_agent_mo6qq-qoks2s8WqG'
+        };
+        
+        let sessionId = generateSessionId();
 
-        // Initialize session on page load
-        async function initializeSession() {
-            try {
-                const response = await fetch(`${API_BASE_URL}/connect`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({})
-                });
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    sessionId = data.session_id;
-                    console.log('Session initialized:', sessionId);
-                } else {
-                    throw new Error('Failed to initialize session');
-                }
-            } catch (error) {
-                console.error('Error initializing session:', error);
-                addMessage('agent', 'Sorry, I could not connect to the service. Please refresh the page.', true);
-            }
+        // Generate a unique session ID
+        function generateSessionId() {
+            return 'session_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
         }
 
         async function sendMessage() {
@@ -133,7 +122,7 @@
             const sendButton = document.getElementById('sendButton');
             const message = input.value.trim();
             
-            if (!message || !sessionId) return;
+            if (!message) return;
 
             // Add user message to chat
             addMessage('user', message);
@@ -144,32 +133,89 @@
             const loadingId = addMessage('agent', 'Thinking...', false, true);
 
             try {
-                const response = await fetch(`${API_BASE_URL}/query`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        session_id: sessionId,
-                        query: message
-                    })
-                });
+                let response;
+                
+                if (USE_LAMBDA) {
+                    // Call Lambda proxy
+                    response = await callLambdaProxy(message);
+                } else {
+                    // Call AgentCore directly (requires AWS SDK)
+                    response = await callAgentCoreDirect(message);
+                }
 
                 // Remove loading message
                 removeMessage(loadingId);
-
-                if (response.ok) {
-                    const data = await response.json();
-                    addMessage('agent', data.formatted_response || data.response);
-                } else {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
+                
+                addMessage('agent', response);
+                
             } catch (error) {
                 console.error('Error sending message:', error);
                 removeMessage(loadingId);
                 addMessage('agent', 'Sorry, there was an error processing your request. Please try again.', true);
             } finally {
                 sendButton.disabled = false;
+            }
+        }
+
+        async function callLambdaProxy(message) {
+            const response = await fetch(LAMBDA_API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    prompt: message,
+                    sessionId: sessionId
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            return data.response || data.error || 'No response received';
+        }
+
+        async function callAgentCoreDirect(message) {
+            // This requires AWS SDK to be loaded and AWS credentials configured
+            if (typeof AWS === 'undefined') {
+                throw new Error('AWS SDK not loaded. Please include AWS SDK or use Lambda proxy.');
+            }
+
+            const agentCoreClient = new AWS.BedrockAgentCore({
+                region: AGENTCORE_CONFIG.region
+            });
+
+            const payload = JSON.stringify({
+                prompt: message,
+                sessionId: sessionId
+            });
+
+            const params = {
+                agentRuntimeArn: AGENTCORE_CONFIG.agentArn,
+                payload: payload
+            };
+
+            const response = await agentCoreClient.invokeAgentRuntime(params).promise();
+            
+            // Process the response (similar to your apitest.py logic)
+            const contentType = response.contentType || '';
+            
+            if (contentType.includes('text/event-stream')) {
+                // Handle streaming response
+                const content = [];
+                for (const line of response.response.split('\n')) {
+                    if (line.startsWith('data: ')) {
+                        content.push(line.substring(6));
+                    }
+                }
+                return content.join('\n');
+            } else if (contentType === 'application/json') {
+                // Handle JSON response
+                return JSON.parse(response.response).response || response.response;
+            } else {
+                return response.response || 'No response content';
             }
         }
 
@@ -205,8 +251,10 @@
             }
         });
 
-        // Initialize session when page loads
-        window.addEventListener('load', initializeSession);
+        // Initialize when page loads
+        window.addEventListener('load', function() {
+            console.log('Envision Agent Chat initialized with session:', sessionId);
+        });
     </script>
 </body>
 </html>
