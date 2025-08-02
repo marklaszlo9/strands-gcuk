@@ -1,6 +1,16 @@
 # Core dependencies for local development and CLI
 bedrock-agentcore
 boto3
+uv
+
+# Observability and instrumentation
+bedrock_agentcore_starter_toolkit
+aws-opentelemetry-distro
+opentelemetry-api
+opentelemetry-sdk
+
+# HTTP server for AgentCore service contract
+aiohttp>=3.8.0
 
 # Optional: For local FastAPI development (not needed for Lambda deployment)
 fastapi==0.115.12

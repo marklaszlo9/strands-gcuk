@@ -1,6 +1,6 @@
 """
-AWS Lambda function to proxy requests to AgentCore service
-This keeps AWS credentials server-side and provides a clean API for the frontend
+Simplified AWS Lambda function to proxy requests to AgentCore service
+This version removes observability to isolate syntax issues
 """
 import json
 import boto3
