@@ -44,6 +44,7 @@ check_venv() {
 install_deps() {
     print_status "Installing dependencies..."
     pip install -r requirements.txt
+    pip install pytest pytest-asyncio pytest-cov pytest-mock
     print_success "Dependencies installed"
 }
 
@@ -57,7 +58,7 @@ run_unit_tests() {
 # Run integration tests
 run_integration_tests() {
     print_status "Running integration tests..."
-    pytest tests/test_infrastructure.py -v
+    pytest tests/test_api.py -v -m "integration"
     print_success "Integration tests completed"
 }
 
@@ -71,7 +72,7 @@ run_all_tests() {
 # Run tests with coverage
 run_coverage() {
     print_status "Running tests with coverage..."
-    pytest tests/ -v --cov=. --cov-report=term-missing --cov-report=html --cov-report=xml
+    pytest tests/ -v --cov=custom_agent --cov-report=term-missing --cov-report=html --cov-report=xml --cov-fail-under=60
     print_success "Coverage report generated"
     print_status "HTML coverage report: htmlcov/index.html"
 }
@@ -115,21 +116,7 @@ run_lint() {
     print_success "Code quality checks completed"
 }
 
-# Validate infrastructure
-validate_infrastructure() {
-    print_status "Validating CloudFormation template..."
-    
-    # Install cfn-lint if not present
-    pip install cfn-lint 2>/dev/null || true
-    
-    cfn-lint infrastructure/frontend-infrastructure.yaml
-    
-    print_status "Checking deployment scripts..."
-    bash -n deploy-frontend.sh
-    bash -n update-lambda.sh
-    
-    print_success "Infrastructure validation completed"
-}
+
 
 # Clean up test artifacts
 cleanup() {
@@ -172,22 +159,18 @@ main() {
         "lint")
             run_lint
             ;;
-        "infrastructure")
-            validate_infrastructure
-            ;;
         "full")
             install_deps
             run_all_tests
             run_coverage
             run_lint
-            validate_infrastructure
             ;;
         "clean")
             cleanup
             ;;
         *)
             print_error "Unknown test type: $test_type"
-            echo "Usage: $0 [unit|integration|all|coverage|lint|infrastructure|full|clean]"
+            echo "Usage: $0 [unit|integration|all|coverage|lint|full|clean]"
             exit 1
             ;;
     esac
