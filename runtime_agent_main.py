@@ -14,6 +14,8 @@ import json
 from typing import Optional
 from aiohttp import web, web_request
 import aiohttp
+import boto3
+from datetime import datetime
 
 @web.middleware
 async def access_log_middleware(request, handler):
@@ -39,13 +41,125 @@ logger = logging.getLogger(__name__)
 prompt_logger = logging.getLogger('bedrockagent.prompt')
 prompt_logger.setLevel(logging.INFO)
 
-# Create a separate handler for prompt logging if not already configured
-if not prompt_logger.handlers:
-    prompt_handler = logging.StreamHandler()
-    prompt_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    prompt_handler.setFormatter(prompt_formatter)
-    prompt_logger.addHandler(prompt_handler)
-    prompt_logger.propagate = False  # Don't propagate to root logger to avoid duplicates
+class CloudWatchHandler(logging.Handler):
+    """Custom CloudWatch handler for prompt logging"""
+    
+    def __init__(self, log_group_name='/bedrockagent/prompt', region='us-east-1'):
+        super().__init__()
+        self.log_group_name = log_group_name
+        self.region = region
+        self.log_stream_name = f"prompt-stream-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+        self.cloudwatch_client = None
+        self.sequence_token = None
+        self._initialize_cloudwatch()
+    
+    def _initialize_cloudwatch(self):
+        """Initialize CloudWatch client and create log group/stream if needed"""
+        try:
+            # Get region from environment or use default
+            region = os.environ.get('AWS_DEFAULT_REGION', self.region)
+            session = boto3.Session()
+            self.cloudwatch_client = session.client('logs', region_name=region)
+            
+            # Create log group if it doesn't exist
+            try:
+                self.cloudwatch_client.create_log_group(logGroupName=self.log_group_name)
+                logger.info(f"✅ Created CloudWatch log group: {self.log_group_name}")
+            except self.cloudwatch_client.exceptions.ResourceAlreadyExistsException:
+                logger.debug(f"CloudWatch log group already exists: {self.log_group_name}")
+            except Exception as e:
+                logger.warning(f"Could not create log group {self.log_group_name}: {str(e)}")
+            
+            # Create log stream
+            try:
+                self.cloudwatch_client.create_log_stream(
+                    logGroupName=self.log_group_name,
+                    logStreamName=self.log_stream_name
+                )
+                logger.info(f"✅ Created CloudWatch log stream: {self.log_stream_name}")
+            except self.cloudwatch_client.exceptions.ResourceAlreadyExistsException:
+                logger.debug(f"CloudWatch log stream already exists: {self.log_stream_name}")
+            except Exception as e:
+                logger.warning(f"Could not create log stream {self.log_stream_name}: {str(e)}")
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize CloudWatch logging: {str(e)}")
+            self.cloudwatch_client = None
+    
+    def emit(self, record):
+        """Send log record to CloudWatch"""
+        if not self.cloudwatch_client:
+            return
+        
+        try:
+            # Format the log message
+            message = self.format(record)
+            timestamp = int(record.created * 1000)  # CloudWatch expects milliseconds
+            
+            # Prepare log event
+            log_event = {
+                'timestamp': timestamp,
+                'message': message
+            }
+            
+            # Send to CloudWatch
+            kwargs = {
+                'logGroupName': self.log_group_name,
+                'logStreamName': self.log_stream_name,
+                'logEvents': [log_event]
+            }
+            
+            if self.sequence_token:
+                kwargs['sequenceToken'] = self.sequence_token
+            
+            response = self.cloudwatch_client.put_log_events(**kwargs)
+            self.sequence_token = response.get('nextSequenceToken')
+            
+        except self.cloudwatch_client.exceptions.InvalidSequenceTokenException:
+            # Handle sequence token issues by getting the correct token
+            try:
+                streams = self.cloudwatch_client.describe_log_streams(
+                    logGroupName=self.log_group_name,
+                    logStreamNamePrefix=self.log_stream_name
+                )
+                if streams['logStreams']:
+                    self.sequence_token = streams['logStreams'][0].get('uploadSequenceToken')
+                    # Retry with correct token
+                    kwargs['sequenceToken'] = self.sequence_token
+                    response = self.cloudwatch_client.put_log_events(**kwargs)
+                    self.sequence_token = response.get('nextSequenceToken')
+            except Exception as retry_e:
+                logger.error(f"Failed to retry CloudWatch log after sequence token error: {str(retry_e)}")
+            
+        except Exception as e:
+            logger.error(f"Failed to send log to CloudWatch: {str(e)}")
+
+# Create CloudWatch handler for prompt logging if in AWS environment
+try:
+    # Check if we're running in AWS (has AWS credentials)
+    session = boto3.Session()
+    credentials = session.get_credentials()
+    
+    if credentials and not prompt_logger.handlers:
+        # Use CloudWatch handler in AWS environment
+        cloudwatch_handler = CloudWatchHandler()
+        cloudwatch_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        cloudwatch_handler.setFormatter(cloudwatch_formatter)
+        prompt_logger.addHandler(cloudwatch_handler)
+        prompt_logger.propagate = False
+        logger.info("✅ CloudWatch handler configured for prompt logging")
+    else:
+        raise Exception("No AWS credentials found")
+        
+except Exception as e:
+    # Fallback to console logging if CloudWatch is not available
+    logger.warning(f"CloudWatch not available, using console for prompt logging: {str(e)}")
+    if not prompt_logger.handlers:
+        prompt_handler = logging.StreamHandler()
+        prompt_formatter = logging.Formatter('%(asctime)s - PROMPT - %(levelname)s - %(message)s')
+        prompt_handler.setFormatter(prompt_formatter)
+        prompt_logger.addHandler(prompt_handler)
+        prompt_logger.propagate = False
 
 # Import AgentCore Runtime for observability (as per AWS docs)
 try:
