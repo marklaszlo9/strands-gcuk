@@ -15,12 +15,17 @@ from typing import Optional
 from aiohttp import web, web_request
 import aiohttp
 
-async def access_log_middleware(request, handler, access_logger):
+@web.middleware
+async def access_log_middleware(request, handler):
     """Custom access log middleware to filter out /ping calls"""
     start_time = asyncio.get_event_loop().time()
     response = await handler(request)
     process_time = asyncio.get_event_loop().time() - start_time
-    await access_logger(request, response, process_time)
+    
+    # Only log non-ping requests
+    if request.path != '/ping':
+        logger.info(f"{request.method} {request.path} - {response.status} - {process_time:.3f}s")
+    
     return response
 
 # Configure logging
@@ -305,12 +310,8 @@ async def start_http_server():
     app.router.add_get('/ping', ping_endpoint)
     app.router.add_post('/invocations', invocations_endpoint)
     
-    # Custom access log format to exclude /ping calls
-    async def access_logger(request, response, time):
-        if request.path != '/ping':  # Don't log ping calls
-            logger.info(f"{request.method} {request.path} - {response.status} - {time:.3f}s")
-    
-    app.middlewares.append(lambda request, handler: access_log_middleware(request, handler, access_logger))
+    # Add custom access log middleware to exclude /ping calls
+    app.middlewares.append(access_log_middleware)
     
     # Start server on port 8080 (required by AgentCore) with custom access log
     runner = web.AppRunner(app, access_log=None)  # Disable default access log
