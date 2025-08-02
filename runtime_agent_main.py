@@ -15,6 +15,14 @@ from typing import Optional
 from aiohttp import web, web_request
 import aiohttp
 
+async def access_log_middleware(request, handler, access_logger):
+    """Custom access log middleware to filter out /ping calls"""
+    start_time = asyncio.get_event_loop().time()
+    response = await handler(request)
+    process_time = asyncio.get_event_loop().time() - start_time
+    await access_logger(request, response, process_time)
+    return response
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -220,7 +228,7 @@ async def health_endpoint(request: web_request.Request) -> web.Response:
 async def ping_endpoint(request: web_request.Request) -> web.Response:
     """
     Ping endpoint required by AgentCore service contract
-    GET /ping - Simple liveness check
+    GET /ping - Simple liveness check (no logging to avoid spam)
     """
     return web.json_response({"message": "pong"}, status=200)
 
@@ -262,21 +270,18 @@ async def invocations_endpoint(request: web_request.Request) -> web.Response:
                 status=400
             )
         
-        logger.info(f"Processing invocation - Prompt: {prompt[:100]}..., SessionId: {session_id}")
+        logger.info(f"User query: {prompt}")
         
         # Process the query
         try:
             response = await runtime_instance.process_query(prompt)
+            logger.info(f"Agent response: {response[:200]}...")
         except Exception as e:
             logger.error(f"Error processing query: {str(e)}")
             response = f"Sorry, an error occurred while processing your request: {str(e)}"
         
-        # Return response
-        return web.json_response({
-            "response": response,
-            "sessionId": session_id,
-            "timestamp": asyncio.get_event_loop().time()
-        }, status=200)
+        # Return only the response (no sessionId or timestamp)
+        return web.json_response(response, status=200)
         
     except Exception as e:
         logger.error(f"Invocations endpoint error: {str(e)}")
@@ -292,7 +297,7 @@ async def start_http_server():
     # Initialize runtime
     runtime_instance = AgentCoreRuntime()
     
-    # Create aiohttp application
+    # Create aiohttp application with custom logging
     app = web.Application()
     
     # Add required endpoints
@@ -300,8 +305,15 @@ async def start_http_server():
     app.router.add_get('/ping', ping_endpoint)
     app.router.add_post('/invocations', invocations_endpoint)
     
-    # Start server on port 8080 (required by AgentCore)
-    runner = web.AppRunner(app)
+    # Custom access log format to exclude /ping calls
+    async def access_logger(request, response, time):
+        if request.path != '/ping':  # Don't log ping calls
+            logger.info(f"{request.method} {request.path} - {response.status} - {time:.3f}s")
+    
+    app.middlewares.append(lambda request, handler: access_log_middleware(request, handler, access_logger))
+    
+    # Start server on port 8080 (required by AgentCore) with custom access log
+    runner = web.AppRunner(app, access_log=None)  # Disable default access log
     await runner.setup()
     
     site = web.TCPSite(runner, '0.0.0.0', 8080)

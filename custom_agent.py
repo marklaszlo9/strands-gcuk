@@ -78,21 +78,21 @@ Follow these instructions precisely:
         
         if AGENTCORE_AVAILABLE and self.memory_id:
             try:
-                # Try different initialization patterns for MemoryClient
+                # Initialize MemoryClient with explicit region to avoid us-west-2 default
                 try:
-                    # First try without region parameter (most likely correct)
-                    self.memory_client = MemoryClient()
-                    logger.info(f"✅ AgentCore MemoryClient initialized without region parameter")
+                    # Try with region parameter first to ensure correct region
+                    self.memory_client = MemoryClient(region=self.region)
+                    logger.info(f"✅ AgentCore MemoryClient initialized with region {self.region}")
                 except TypeError:
-                    # If that fails, try with region parameter
-                    try:
-                        self.memory_client = MemoryClient(region=self.region)
-                        logger.info(f"✅ AgentCore MemoryClient initialized with region parameter")
-                    except Exception as e2:
-                        logger.error(f"Both initialization methods failed: {str(e2)}")
-                        raise e2
+                    # If region parameter not supported, try without but set AWS_DEFAULT_REGION
+                    os.environ['AWS_DEFAULT_REGION'] = self.region
+                    self.memory_client = MemoryClient()
+                    logger.info(f"✅ AgentCore MemoryClient initialized (region set via env: {self.region})")
+                except Exception as e2:
+                    logger.error(f"MemoryClient initialization failed: {str(e2)}")
+                    raise e2
                 
-                logger.info(f"✅ AgentCore MemoryClient ready for memory_id: {self.memory_id}")
+                logger.info(f"✅ AgentCore MemoryClient ready for memory_id: {self.memory_id} in region {self.region}")
             except Exception as e:
                 logger.warning(f"Could not initialize AgentCore MemoryClient: {str(e)}")
                 # Fall back to boto3 client
@@ -137,11 +137,11 @@ Follow these instructions precisely:
         return self._bedrock_agent_runtime
     
     def _init_boto3_fallback(self):
-        """Initialize boto3 bedrock-agentcore client as fallback"""
+        """Initialize boto3 bedrock-agentcore client as fallback with explicit region"""
         try:
             session = boto3.Session()
             self._bedrock_agentcore = session.client('bedrock-agentcore', region_name=self.region)
-            logger.info("✅ Initialized boto3 bedrock-agentcore client fallback")
+            logger.info(f"✅ Initialized boto3 bedrock-agentcore client fallback in region {self.region}")
         except Exception as e:
             logger.error(f"Failed to initialize boto3 bedrock-agentcore client: {str(e)}")
             self._bedrock_agentcore = None
