@@ -44,7 +44,7 @@ check_venv() {
 install_deps() {
     print_status "Installing dependencies..."
     pip install -r requirements.txt
-    pip install pytest pytest-asyncio pytest-cov pytest-mock
+    pip install pytest pytest-asyncio>=0.21.0 pytest-cov pytest-mock
     print_success "Dependencies installed"
 }
 

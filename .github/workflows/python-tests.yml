@@ -23,7 +23,6 @@ jobs:
       run: |
         pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pytest pytest-asyncio pytest-cov pytest-mock # Ensure testing tools are installed
 
     - name: Run Pytest with Coverage
       # This 'env' block makes the secret available to the pytest command
