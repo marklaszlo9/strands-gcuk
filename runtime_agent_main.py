@@ -35,6 +35,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Configure separate logger for prompts (will go to /bedrockagent/prompt log group)
+prompt_logger = logging.getLogger('bedrockagent.prompt')
+prompt_logger.setLevel(logging.INFO)
+
+# Create a separate handler for prompt logging if not already configured
+if not prompt_logger.handlers:
+    prompt_handler = logging.StreamHandler()
+    prompt_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    prompt_handler.setFormatter(prompt_formatter)
+    prompt_logger.addHandler(prompt_handler)
+    prompt_logger.propagate = False  # Don't propagate to root logger to avoid duplicates
+
 # Import AgentCore Runtime for observability (as per AWS docs)
 try:
     from bedrock_agentcore_starter_toolkit import Runtime
@@ -275,18 +287,23 @@ async def invocations_endpoint(request: web_request.Request) -> web.Response:
                 status=400
             )
         
-        logger.info(f"User query: {prompt}")
+        # Log user query to separate prompt log group
+        prompt_logger.info(f"USER_QUERY: {prompt}")
         
         # Process the query
         try:
             response = await runtime_instance.process_query(prompt)
-            logger.info(f"Agent response: {response[:200]}...")
+            # Log agent response to separate prompt log group
+            prompt_logger.info(f"AGENT_RESPONSE: {response}")
+            # Keep abbreviated response in main log for debugging
+            logger.info(f"Query processed successfully, response length: {len(response)} chars")
         except Exception as e:
             logger.error(f"Error processing query: {str(e)}")
+            prompt_logger.error(f"QUERY_ERROR: {str(e)}")
             response = f"Sorry, an error occurred while processing your request: {str(e)}"
         
-        # Return only the response (no sessionId or timestamp)
-        return web.json_response(response, status=200)
+        # Return only the response as plain text (no sessionId or timestamp)
+        return web.Response(text=response, status=200, content_type='text/plain')
         
     except Exception as e:
         logger.error(f"Invocations endpoint error: {str(e)}")
