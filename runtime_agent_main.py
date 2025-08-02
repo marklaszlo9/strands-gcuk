@@ -89,6 +89,7 @@ class CloudWatchHandler(logging.Handler):
     def emit(self, record):
         """Send log record to CloudWatch"""
         if not self.cloudwatch_client:
+            logger.error("CloudWatch client not available in emit()")
             return
         
         try:
@@ -112,8 +113,10 @@ class CloudWatchHandler(logging.Handler):
             if self.sequence_token:
                 kwargs['sequenceToken'] = self.sequence_token
             
+            logger.info(f"Sending log to CloudWatch: {self.log_group_name}/{self.log_stream_name}")
             response = self.cloudwatch_client.put_log_events(**kwargs)
             self.sequence_token = response.get('nextSequenceToken')
+            logger.info(f"Successfully sent log to CloudWatch, next token: {self.sequence_token}")
             
         except self.cloudwatch_client.exceptions.InvalidSequenceTokenException:
             # Handle sequence token issues by getting the correct token
@@ -148,6 +151,13 @@ try:
         prompt_logger.addHandler(cloudwatch_handler)
         prompt_logger.propagate = False
         logger.info("✅ CloudWatch handler configured for prompt logging")
+        
+        # Also add a console handler so we can see prompts in main log too (for debugging)
+        console_handler = logging.StreamHandler()
+        console_formatter = logging.Formatter('%(asctime)s - PROMPT_DEBUG - %(levelname)s - %(message)s')
+        console_handler.setFormatter(console_formatter)
+        prompt_logger.addHandler(console_handler)
+        
     else:
         raise Exception("No AWS credentials found")
         
@@ -402,13 +412,17 @@ async def invocations_endpoint(request: web_request.Request) -> web.Response:
             )
         
         # Log user query to separate prompt log group
+        logger.info(f"About to log USER_QUERY to prompt_logger: {prompt[:100]}...")
         prompt_logger.info(f"USER_QUERY: {prompt}")
+        logger.info(f"Logged USER_QUERY to prompt_logger")
         
         # Process the query
         try:
             response = await runtime_instance.process_query(prompt)
             # Log agent response to separate prompt log group
+            logger.info(f"About to log AGENT_RESPONSE to prompt_logger: {len(response)} chars")
             prompt_logger.info(f"AGENT_RESPONSE: {response}")
+            logger.info(f"Logged AGENT_RESPONSE to prompt_logger")
             # Keep abbreviated response in main log for debugging
             logger.info(f"Query processed successfully, response length: {len(response)} chars")
         except Exception as e:
@@ -456,6 +470,11 @@ async def start_http_server():
     logger.info("   GET  /health      - Health check")
     logger.info("   GET  /ping        - Liveness check") 
     logger.info("   POST /invocations - Agent invocations")
+    
+    # Test prompt logger to verify it's working
+    logger.info("Testing prompt logger...")
+    prompt_logger.info("TEST_MESSAGE: Prompt logger is working at startup")
+    logger.info("Prompt logger test completed")
     
     return runner
 
