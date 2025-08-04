@@ -1,15 +1,17 @@
 # Observability Guide
 
-This document explains how to use the OpenTelemetry observability features integrated into the Envision Agent project using the `bedrock_agentcore_starter_toolkit`.
+This document explains the comprehensive observability features integrated into the Envision Agent project, including OpenTelemetry instrumentation, structured logging, and monitoring capabilities.
 
 ## Overview
 
-The project includes comprehensive observability through OpenTelemetry instrumentation, providing:
+The project includes production-ready observability through multiple layers:
 
-- **Distributed Tracing** - Track requests across Lambda, AgentCore, and Bedrock services
-- **Metrics Collection** - Monitor performance, token usage, and error rates
-- **Structured Logging** - Enhanced logging with trace correlation
-- **AWS X-Ray Integration** - Native AWS observability through OpenTelemetry
+- **OpenTelemetry Instrumentation** - Distributed tracing across all components
+- **Structured Logging** - Clean, filtered logs with separate prompt streams
+- **Health Monitoring** - AgentCore service contract compliance
+- **Security Logging** - Separate log streams for user interactions
+- **Performance Metrics** - Token usage, latency, and error tracking
+- **AWS Integration** - CloudWatch, X-Ray, and custom metrics
 
 ## Components with Observability
 
