@@ -8,93 +8,172 @@
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             margin: 0;
-            padding: 20px;
-            background-color: #f5f5f5;
+            padding: 0;
+            background-color: #F3FBF3;
+            height: 100vh;
+            overflow: hidden;
         }
         .chat-container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            background: #F3FBF3;
             overflow: hidden;
         }
         .chat-header {
-            background: #2c3e50;
+            background: #1A7A75;
             color: white;
-            padding: 20px;
+            padding: 8px 12px;
             text-align: center;
+            flex-shrink: 0;
+            border-bottom: 1px solid #95A8A0;
+        }
+        .chat-header h1 {
+            margin: 0;
+            font-size: 14px;
+            font-weight: 600;
         }
         .chat-messages {
-            height: 400px;
+            flex: 1;
             overflow-y: auto;
-            padding: 20px;
-            border-bottom: 1px solid #eee;
+            padding: 12px;
+            background: #F3FBF3;
         }
         .message {
-            margin-bottom: 15px;
-            padding: 10px;
-            border-radius: 8px;
+            margin-bottom: 8px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .message strong {
+            font-size: 12px;
+            color: #7F828A;
         }
         .message.user {
-            background: #e3f2fd;
-            margin-left: 20%;
+            background: white;
+            margin-left: 15%;
+            border: 1px solid #B7B8BE;
+            color: #7F828A;
         }
         .message.agent {
-            background: #f1f8e9;
-            margin-right: 20%;
+            background: white;
+            margin-right: 15%;
+            border: 1px solid #7C9D84;
+            color: #1A7A75;
         }
         .chat-input {
             display: flex;
-            padding: 20px;
+            padding: 10px;
+            background: white;
+            border-top: 1px solid #95A8A0;
+            flex-shrink: 0;
         }
         .chat-input input {
             flex: 1;
-            padding: 12px;
-            border: 1px solid #ddd;
+            padding: 8px 10px;
+            border: 1px solid #B7B8BE;
             border-radius: 4px;
-            font-size: 16px;
+            font-size: 13px;
+            outline: none;
+            color: #7F828A;
+        }
+        .chat-input input:focus {
+            border-color: #1A7A75;
+        }
+        .chat-input input::placeholder {
+            color: #95A8A0;
         }
         .chat-input button {
-            margin-left: 10px;
-            padding: 12px 20px;
-            background: #2c3e50;
+            margin-left: 8px;
+            padding: 8px 12px;
+            background: #1A7A75;
             color: white;
             border: none;
             border-radius: 4px;
             cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
         }
         .chat-input button:hover {
-            background: #34495e;
+            background: #7C9D84;
         }
         .chat-input button:disabled {
-            background: #bdc3c7;
+            background: #B7B8BE;
             cursor: not-allowed;
         }
         .loading {
-            color: #7f8c8d;
+            color: #95A8A0;
             font-style: italic;
+            font-size: 12px;
         }
         .error {
-            color: #e74c3c;
-            background: #fdf2f2;
-            border: 1px solid #fecaca;
+            color: #1A7A75;
+            background: #F3FBF3;
+            border: 1px solid #95A8A0;
+        }
+        
+        /* Markdown formatting styles */
+        .message ol, .message ul {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+        .message li {
+            margin: 4px 0;
+        }
+        .message .bold {
+            font-weight: 600;
+            color: #1A7A75;
+        }
+        
+        /* Responsive adjustments for small iframe sizes */
+        @media (max-width: 400px) {
+            .message.user {
+                margin-left: 5%;
+            }
+            .message.agent {
+                margin-right: 5%;
+            }
+            .chat-input {
+                padding: 8px;
+            }
+            .chat-input input {
+                font-size: 12px;
+                padding: 6px 8px;
+            }
+            .chat-input button {
+                padding: 6px 10px;
+                font-size: 11px;
+            }
+        }
+        
+        @media (max-height: 300px) {
+            .chat-header {
+                padding: 4px 8px;
+            }
+            .chat-header h1 {
+                font-size: 12px;
+            }
+            .message {
+                margin-bottom: 4px;
+                padding: 6px 8px;
+                font-size: 12px;
+            }
         }
     </style>
 </head>
 <body>
     <div class="chat-container">
         <div class="chat-header">
-            <h1>Envision Framework Assistant</h1>
-            <p>Ask questions about the Envision Sustainable Infrastructure Framework</p>
+            <h1>Envision Assistant</h1>
         </div>
         <div class="chat-messages" id="messages">
             <div class="message agent">
-                <strong>Agent:</strong> Hi there, I am your AI agent here to help with questions about the Envision Sustainable Infrastructure Framework.
+                <strong>Agent:</strong> Hi! I'm here to help with Envision framework questions.
             </div>
         </div>
         <div class="chat-input">
-            <input type="text" id="messageInput" placeholder="Ask a question about Envision..." />
+            <input type="text" id="messageInput" placeholder="Ask about Envision..." />
             <button onclick="sendMessage()" id="sendButton">Send</button>
         </div>
     </div>
@@ -186,6 +265,53 @@
             return data.response || data.error || 'No response received';
         }
 
+        async function loadConversationHistory() {
+            try {
+                console.log('Loading conversation history for session:', sessionId);
+                
+                const response = await fetch(LAMBDA_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        action: 'getHistory',
+                        sessionId: sessionId,
+                        k: 3  // Get last 3 messages
+                    })
+                });
+
+                if (!response.ok) {
+                    console.log('No history available or error loading history');
+                    return;
+                }
+
+                const data = await response.json();
+                const messages = data.messages || [];
+                
+                if (messages.length > 0) {
+                    console.log(`Loading ${messages.length} previous messages`);
+                    
+                    // Clear the default welcome message
+                    const messagesContainer = document.getElementById('messages');
+                    messagesContainer.innerHTML = '';
+                    
+                    // Add the historical messages
+                    messages.forEach(msg => {
+                        addMessage(msg.role, msg.content);
+                    });
+                    
+                    console.log('Conversation history loaded successfully');
+                } else {
+                    console.log('No previous conversation history found');
+                }
+
+            } catch (error) {
+                console.log('Could not load conversation history:', error);
+                // Don't show error to user, just continue with default welcome message
+            }
+        }
+
         async function callAgentCoreDirect(message) {
             // This requires AWS SDK to be loaded and AWS credentials configured
             if (typeof AWS === 'undefined') {
@@ -228,6 +354,75 @@
             }
         }
 
+        function formatMarkdown(text) {
+            // Convert **bold** to <span class="bold">bold</span>
+            text = text.replace(/\*\*(.*?)\*\*/g, '<span class="bold">$1</span>');
+            
+            // Convert numbered lists (1. item) to proper HTML lists
+            const lines = text.split('\n');
+            let inList = false;
+            let formattedLines = [];
+            
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                
+                // Skip empty lines
+                if (!line) {
+                    continue;
+                }
+                
+                const numberedListMatch = line.match(/^(\d+)\.\s+(.+)/);
+                
+                if (numberedListMatch) {
+                    if (!inList) {
+                        formattedLines.push('<ol>');
+                        inList = true;
+                    }
+                    formattedLines.push(`<li>${numberedListMatch[2]}</li>`);
+                } else {
+                    if (inList) {
+                        formattedLines.push('</ol>');
+                        inList = false;
+                    }
+                    formattedLines.push(line);
+                }
+            }
+            
+            if (inList) {
+                formattedLines.push('</ol>');
+            }
+            
+            // Join with proper spacing - no <br> inside lists
+            let result = '';
+            let inListTag = false;
+            
+            for (let i = 0; i < formattedLines.length; i++) {
+                const line = formattedLines[i];
+                
+                if (line === '<ol>') {
+                    inListTag = true;
+                    result += line;
+                } else if (line === '</ol>') {
+                    inListTag = false;
+                    result += line;
+                    // Add break after list ends if there's more content
+                    if (i < formattedLines.length - 1) {
+                        result += '<br>';
+                    }
+                } else if (line.startsWith('<li>')) {
+                    result += line;
+                } else {
+                    // Regular text line
+                    if (i > 0 && !inListTag) {
+                        result += '<br>';
+                    }
+                    result += line;
+                }
+            }
+            
+            return result;
+        }
+
         function addMessage(sender, content, isError = false, isLoading = false) {
             const messagesContainer = document.getElementById('messages');
             const messageDiv = document.createElement('div');
@@ -238,7 +433,10 @@
             if (isError) messageDiv.className += ' error';
             if (isLoading) messageDiv.className += ' loading';
 
-            messageDiv.innerHTML = `<strong>${sender === 'user' ? 'You' : 'Agent'}:</strong> ${content}`;
+            // Format markdown for agent messages
+            const formattedContent = sender === 'agent' && !isLoading ? formatMarkdown(content) : content;
+            
+            messageDiv.innerHTML = `<strong>${sender === 'user' ? 'You' : 'Agent'}:</strong> ${formattedContent}`;
 
             messagesContainer.appendChild(messageDiv);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -261,8 +459,11 @@
         });
 
         // Initialize when page loads
-        window.addEventListener('load', function() {
+        window.addEventListener('load', async function() {
             console.log('Envision Agent Chat initialized with session:', sessionId);
+            
+            // Load conversation history if available
+            await loadConversationHistory();
         });
     </script>
 </body>

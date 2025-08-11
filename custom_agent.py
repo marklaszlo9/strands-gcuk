@@ -443,6 +443,100 @@ Follow these instructions precisely:
         """
         return await self._load_conversation_history(k=5)
 
+    async def get_recent_messages(self, k: int = 3) -> list:
+        """
+        Get the last k messages from conversation history for frontend display.
+        Returns a list of message dictionaries with 'role' and 'content' keys.
+        """
+        try:
+            if not self.memory_id:
+                logger.debug("No memory ID available")
+                return []
+
+            import asyncio
+
+            loop = asyncio.get_event_loop()
+
+            # Try AgentCore MemoryClient first
+            if self.memory_client:
+                try:
+                    # Get last k conversation turns using AgentCore MemoryClient
+                    recent_turns = await loop.run_in_executor(
+                        None,
+                        lambda: self.memory_client.get_last_k_turns(
+                            memory_id=self.memory_id,
+                            actor_id=self.actor_id,
+                            session_id=self.session_id,
+                            k=k,
+                            branch_name=self.branch_name,
+                        ),
+                    )
+
+                    if recent_turns:
+                        # Format messages for frontend display
+                        messages = []
+                        for turn in recent_turns:
+                            for message in turn:
+                                role = message["role"].lower()
+                                content = message["content"]["text"]
+                                # Convert to frontend format
+                                frontend_role = "user" if role == "user" else "agent"
+                                messages.append({
+                                    "role": frontend_role,
+                                    "content": content
+                                })
+
+                        logger.debug(f"✅ Retrieved {len(messages)} recent messages via AgentCore")
+                        return messages[-k:] if len(messages) > k else messages  # Return last k messages
+                    else:
+                        logger.debug("No previous messages found")
+                        return []
+
+                except Exception as e:
+                    logger.warning(f"AgentCore MemoryClient failed: {str(e)}")
+
+            # Fall back to boto3 bedrock-agentcore client
+            if self._bedrock_agentcore:
+                try:
+                    # Try to get memory using boto3 client
+                    response = await loop.run_in_executor(
+                        None,
+                        lambda: self._bedrock_agentcore.get_memory(
+                            memoryId=self.memory_id
+                        ),
+                    )
+
+                    # Extract memory content and parse into messages
+                    if "memoryContents" in response:
+                        messages = []
+                        for content in response["memoryContents"][-k*2:]:  # Get more to parse user/agent pairs
+                            if "content" in content:
+                                text = content["content"]
+                                # Parse "User: ..." and "Assistant: ..." format
+                                if text.startswith("User: "):
+                                    messages.append({
+                                        "role": "user",
+                                        "content": text[6:]  # Remove "User: " prefix
+                                    })
+                                elif text.startswith("Assistant: "):
+                                    messages.append({
+                                        "role": "agent",
+                                        "content": text[11:]  # Remove "Assistant: " prefix
+                                    })
+                        
+                        logger.debug(f"✅ Retrieved {len(messages)} messages via boto3 fallback")
+                        return messages[-k:] if len(messages) > k else messages  # Return last k messages
+
+                except Exception as e:
+                    logger.error(f"boto3 fallback also failed: {str(e)}")
+
+            logger.debug("No memory client available")
+            return []
+
+        except Exception as e:
+            logger.error(f"Failed to get recent messages: {str(e)}")
+            return []
+
     async def update_memory(self, user_message: str, assistant_message: str):
         """
         Update AgentCore memory with conversation using MemoryClient.

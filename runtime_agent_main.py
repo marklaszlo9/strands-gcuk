@@ -401,43 +401,82 @@ async def invocations_endpoint(request: web_request.Request) -> web.Response:
                 {"error": "Invalid JSON in request body"}, status=400
             )
 
-        # Extract prompt from request (try different field names)
-        prompt = None
-        # Extract session_id for potential future use
-        # session_id = body.get("sessionId", "")
+        # Check if this is a history request
+        action = body.get("action", "query")
+        session_id = body.get("sessionId", "")
 
-        for field in ["prompt", "query", "message", "input", "text"]:
-            if field in body:
-                prompt = body[field]
-                break
+        if action == "getHistory":
+            # Handle history request
+            try:
+                if not runtime_instance.agent:
+                    await runtime_instance.initialize_agent()
+                
+                # Set session_id for the agent if provided
+                if session_id:
+                    runtime_instance.agent.session_id = session_id
+                    runtime_instance.agent.user_id = session_id
+                    runtime_instance.agent.actor_id = f"envision_agent_{session_id}"
 
-        if not prompt:
-            logger.error(f"No prompt found in request body: {body}")
-            return web.json_response(
-                {"error": "No prompt/query found in request"}, status=400
-            )
+                k = body.get("k", 3)  # Number of messages to retrieve
+                messages = await runtime_instance.agent.get_recent_messages(k)
+                
+                logger.info(f"Retrieved {len(messages)} messages for session {session_id}")
+                
+                return web.json_response({
+                    "messages": messages,
+                    "sessionId": session_id
+                }, status=200)
 
-        # Log user query to separate prompt log group
-        prompt_logger.info(f"USER_QUERY: {prompt}")
+            except Exception as e:
+                logger.error(f"Error retrieving history: {str(e)}")
+                return web.json_response({
+                    "messages": [],
+                    "error": f"Could not retrieve history: {str(e)}"
+                }, status=200)  # Return 200 with empty messages rather than error
 
-        # Process the query
-        try:
-            response = await runtime_instance.process_query(prompt)
-            # Log agent response to separate prompt log group
-            prompt_logger.info(f"AGENT_RESPONSE: {response}")
-            # Keep abbreviated response in main log for debugging
-            logger.info(
-                f"Query processed successfully, response length: {len(response)} chars"
-            )
-        except Exception as e:
-            logger.error(f"Error processing query: {str(e)}")
-            prompt_logger.error(f"QUERY_ERROR: {str(e)}")
-            response = (
-                f"Sorry, an error occurred while processing your request: {str(e)}"
-            )
+        else:
+            # Handle regular query request
+            # Extract prompt from request (try different field names)
+            prompt = None
 
-        # Return only the response as plain text (no sessionId or timestamp)
-        return web.Response(text=response, status=200, content_type="text/plain")
+            for field in ["prompt", "query", "message", "input", "text"]:
+                if field in body:
+                    prompt = body[field]
+                    break
+
+            if not prompt:
+                logger.error(f"No prompt found in request body: {body}")
+                return web.json_response(
+                    {"error": "No prompt/query found in request"}, status=400
+                )
+
+            # Set session_id for the agent if provided
+            if session_id and runtime_instance.agent:
+                runtime_instance.agent.session_id = session_id
+                runtime_instance.agent.user_id = session_id
+                runtime_instance.agent.actor_id = f"envision_agent_{session_id}"
+
+            # Log user query to separate prompt log group
+            prompt_logger.info(f"USER_QUERY: {prompt}")
+
+            # Process the query
+            try:
+                response = await runtime_instance.process_query(prompt)
+                # Log agent response to separate prompt log group
+                prompt_logger.info(f"AGENT_RESPONSE: {response}")
+                # Keep abbreviated response in main log for debugging
+                logger.info(
+                    f"Query processed successfully, response length: {len(response)} chars"
+                )
+            except Exception as e:
+                logger.error(f"Error processing query: {str(e)}")
+                prompt_logger.error(f"QUERY_ERROR: {str(e)}")
+                response = (
+                    f"Sorry, an error occurred while processing your request: {str(e)}"
+                )
+
+            # Return only the response as plain text (no sessionId or timestamp)
+            return web.Response(text=response, status=200, content_type="text/plain")
 
     except Exception as e:
         logger.error(f"Invocations endpoint error: {str(e)}")

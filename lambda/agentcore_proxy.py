@@ -57,22 +57,41 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         except json.JSONDecodeError as e:
             return create_error_response(400, f"Invalid JSON in request body: {str(e)}")
 
-        # Extract the prompt from the request
-        prompt = body.get("prompt", "")
+        # Check if this is a history request
+        action = body.get("action", "query")
         session_id = body.get("sessionId", "")
 
-        if not prompt:
-            return create_error_response(400, "Missing 'prompt' in request body")
+        if action == "getHistory":
+            # Handle history request
+            if not session_id:
+                return create_error_response(400, "Missing 'sessionId' for history request")
+            
+            logger.info(f"Processing history request for SessionId: {session_id}")
+            
+            # Prepare the payload for AgentCore to get history
+            payload = json.dumps({
+                "action": "getHistory", 
+                "sessionId": session_id,
+                "k": body.get("k", 3)  # Number of messages to retrieve
+            }).encode("utf-8")
+            
+        else:
+            # Handle regular query request
+            prompt = body.get("prompt", "")
+            
+            if not prompt:
+                return create_error_response(400, "Missing 'prompt' in request body")
 
-        logger.info(
-            f"Processing request - Prompt: {prompt[:100]}..., SessionId: {session_id}"
-        )
+            logger.info(
+                f"Processing query request - Prompt: {prompt[:100]}..., SessionId: {session_id}"
+            )
+            
+            # Prepare the payload for AgentCore
+            payload = json.dumps({"prompt": prompt, "sessionId": session_id}).encode(
+                "utf-8"
+            )
+
         logger.info(f"Using Agent ARN: {AGENT_ARN}")
-
-        # Prepare the payload for AgentCore
-        payload = json.dumps({"prompt": prompt, "sessionId": session_id}).encode(
-            "utf-8"
-        )
 
         logger.info(f"Payload prepared: {len(payload)} bytes")
 
