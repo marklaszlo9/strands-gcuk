@@ -149,5 +149,3 @@ python agent_cli.py
 5. Submit a pull request
 
 ## License
-
-[Add your license information here]
